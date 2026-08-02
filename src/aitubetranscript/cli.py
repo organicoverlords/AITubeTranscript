@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .fetcher import FetchOptions, fetch_youtube
 from .output import write_bundle
+from .youtubejs import enrich_bundle_with_youtubejs
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,6 +57,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         bundle = fetch_youtube(args.url, options)
+        enrich_bundle_with_youtubejs(
+            bundle,
+            options.comment_limit if options.include_comments else 0,
+        )
         destination = write_bundle(bundle, args.output)
     except Exception as exc:
         print(f"AITubeTranscript failed: {exc}", file=sys.stderr)
