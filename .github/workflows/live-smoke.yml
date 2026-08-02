@@ -25,6 +25,10 @@ jobs:
           fetch = Path(".github/workflows/fetch.yml").read_text(encoding="utf-8")
           smoke = Path(".github/workflows/live-smoke.yml").read_text(encoding="utf-8")
 
+          artifact_action = "actions/" + "upload-artifact"
+          old_live_step = "Fetch acceptance " + "video"
+          fetch_command = "aitube-" + "transcript"
+
           assert "CALLER_REPOSITORY_PRIVATE" in action
           assert "refuses to run in a public repository" in action
           assert "workflow_call:" in fetch
@@ -32,10 +36,10 @@ jobs:
           assert "issues:" not in fetch
           assert "github.event.repository.private" in fetch
           assert "aitube-results" in fetch
-          assert "actions/upload-artifact" not in fetch
-          assert "Fetch acceptance video" not in smoke
-          assert "aitube-transcript \"https:" not in smoke
-          assert "actions/upload-artifact" not in smoke
+          assert artifact_action not in fetch
+          assert old_live_step not in smoke
+          assert f'{fetch_command} "http' not in smoke
+          assert artifact_action not in smoke
 
           print("PRIVACY_ENFORCEMENT=PROVEN")
           PY
