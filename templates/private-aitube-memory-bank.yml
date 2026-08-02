@@ -1,26 +1,23 @@
-name: Private AITube memory bank
+name: Private AITube memory repair
 
 on:
-  workflow_run:
-    workflows:
-      - Private AITube fetch
-      - Private AITube request
-    types: [completed]
   workflow_dispatch:
+    inputs:
+      tool_ref:
+        description: Pinned AITubeTranscript commit to use for repair
+        required: false
+        default: main
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: private-aitube-memory-bank
+  group: private-aitube-results-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  index:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success' ||
-      github.event.workflow_run.conclusion == 'failure'
+  repair:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -29,26 +26,26 @@ jobs:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           test "$REPOSITORY_PRIVATE" = "true" || {
-            echo "::error::The AITube memory bank must run in a private repository."
+            echo "::error::The AITube memory repair must run in a private repository."
             exit 1
           }
 
-      - name: Check out public indexer
-        uses: actions/checkout@v4
+      - name: Check out pinned public repair code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: organicoverlords/AITubeTranscript
-          ref: main
+          ref: ${{ inputs.tool_ref }}
           path: tool
           fetch-depth: 1
 
       - name: Check out private results
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: aitube-results
           path: vault
           fetch-depth: 1
 
-      - name: Rebuild stable and logical memory indexes
+      - name: Rebuild memory, preferred pointers, and retention manifest
         env:
           PYTHONPATH: ${{ github.workspace }}/tool/src
         run: |
@@ -56,13 +53,29 @@ jobs:
           python3 -S -m aitubetranscript.memory_bank \
             --vault "$GITHUB_WORKSPACE/vault" \
             --rebuild-all
+          python3 -S - <<'PY'
+          from pathlib import Path
 
-      - name: Commit private memory bank
+          from aitubetranscript.memory_preference import promote_preferred_video_entries
+          from aitubetranscript.snapshot_store import rebuild_retention_manifest
+
+          vault = Path("vault").resolve()
+          video_ids = [
+              path.parent.parent.name
+              for path in (vault / "videos").glob("*/pointers/best.json")
+          ]
+          promote_preferred_video_entries(vault, video_ids)
+          rebuild_retention_manifest(vault)
+          print(f"PREFERRED_VIDEO_COUNT={len(video_ids)}")
+          print("MEMORY_REPAIR=PROVEN")
+          PY
+
+      - name: Commit repaired private memory bank
         working-directory: vault
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add memory videos
-          git commit -m "Update private AITube memory bank" || exit 0
+          git add memory videos retention
+          git commit -m "Repair private AITube memory bank" || exit 0
           git push origin HEAD:aitube-results
