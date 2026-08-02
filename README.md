@@ -4,6 +4,24 @@
 
 The source code is public. The supported GitHub workflow refuses public callers so requests, logs, transcripts, descriptions, comments, and receipts stay in a private companion repository.
 
+## Start here
+
+- **Install a setup like the working `organicoverlords` deployment:** [`INSTALL.md`](INSTALL.md)
+- **Canonical GPT execution contract:** [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md)
+- **Copy-paste ChatGPT memory instruction:** [`GPT_MEMORY.md`](GPT_MEMORY.md)
+
+The recommended architecture is intentionally simple:
+
+```text
+public tool:     organicoverlords/AITubeTranscript
+private runner:  one private repository
+request branch:  request/aitube-live
+request file:    aitube-requests/current.json
+results branch:  aitube-results
+```
+
+You do not need to fork or modify this public repository.
+
 ## What it produces
 
 Each private result is written to:
@@ -35,89 +53,41 @@ latest/
 
 `reader-manifest.json` is the entry point for an automated reader. It lists the exact bounded files to open, their deterministic order, and groups that may be read in parallel.
 
-## Fast private GitHub setup
+## Private GitHub installation
 
-### 1. Create a private companion repository
+Follow [`INSTALL.md`](INSTALL.md). It covers only the setup required for a deployment like ours:
 
-Generated research must not be stored in this public repository. Create a private repository under your own account or organization.
+1. create one private repository
+2. create and restrict one YouTube Data API key
+3. save it once as `YOUTUBE_API_KEY`
+4. copy the provided private workflow and request-file templates
+5. create `request/aitube-live`
+6. commit a YouTube request
+7. verify the private result
 
-### 2. Add one repository secret
-
-In the private repository, create an Actions secret named:
+The existing deployment already uses:
 
 ```text
-YOUTUBE_API_KEY
+public tool:     organicoverlords/AITubeTranscript
+private runner:  organicoverlords/all
+request branch:  request/aitube-live
+results branch:  aitube-results
 ```
-
-Use your own YouTube Data API key. Do not commit or paste the key into issues, workflow files, transcripts, or chat.
-
-### 3. Add the private caller workflow
-
-Create `.github/workflows/aitube.yml` in the private repository:
-
-```yaml
-name: Private YouTube research
-
-on:
-  workflow_dispatch:
-    inputs:
-      video_url:
-        description: YouTube URL or video ID
-        required: true
-        type: string
-      languages:
-        description: Comma-separated language priority
-        required: false
-        default: en
-        type: string
-      comments:
-        description: Maximum top-level comments
-        required: false
-        default: "100"
-        type: string
-      whisper:
-        description: Use Whisper only when captions are unavailable
-        required: false
-        default: false
-        type: boolean
-
-permissions:
-  contents: write
-
-jobs:
-  fetch:
-    uses: organicoverlords/AITubeTranscript/.github/workflows/fetch.yml@main
-    with:
-      video_url: ${{ inputs.video_url }}
-      languages: ${{ inputs.languages }}
-      comments: ${{ inputs.comments }}
-      whisper: ${{ inputs.whisper }}
-    secrets:
-      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-```
-
-Run **Private YouTube research** from the private repository's Actions page. The optimized cloud path uses the runner's existing Python runtime, shallow-checks out only this small public tool, verifies coverage, and shallow-fetches only the required private result path before publishing.
 
 ## GPT-optimized operation
 
-For an agent with GitHub access, use a stable private request branch and one request file instead of creating a pull request for every video:
+GPT should update one private request file, poll one private receipt, verify the manifests, and read every file listed by `reader-manifest.json`.
 
-```text
-request branch: request/aitube-live
-request file:   aitube-requests/current.json
-results branch: aitube-results
-```
+The core rule is simple: **workflow success is not proof that every word was read**. GPT may claim complete reading only after it has opened every reader file and the coverage manifests are proven.
 
-Canonical agent instructions:
+Use:
 
-- [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md) — exact request, polling, proof, reading, timing, fallback, and privacy contract.
-- [`GPT_MEMORY.md`](GPT_MEMORY.md) — copy-paste memory instructions, including a prefilled deployment and a generic template.
-
-The core rule is simple: **workflow success is not proof that every word was read**. GPT must verify the manifests and actually open every file listed in `reader-manifest.json` before claiming complete reading.
+- [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md) for the exact request, polling, proof, timing, fallback, and privacy contract.
+- [`GPT_MEMORY.md`](GPT_MEMORY.md) for the stable instruction to save in ChatGPT memory.
 
 ## Proof contract
 
-A retrieved transcript may be claimed as completely represented only when:
+A transcript may be claimed as completely represented only when:
 
 ```text
 receipt.transcript_status = PROVEN
@@ -126,7 +96,7 @@ transcript-manifest.coverage.status = PROVEN
 transcript-manifest.coverage.exactly_once = true
 ```
 
-The transcript coverage manifest must also show:
+The coverage manifest must also show:
 
 ```text
 missing_indices = []
@@ -148,13 +118,11 @@ The optimized GitHub path prioritizes low-latency cloud-compatible sources:
 3. repository fallback ladder when the fast path fails
 4. optional Whisper only when captions cannot be retrieved
 
-The standard local path additionally supports `youtube-transcript-api`, `yt-dlp`, Deno/EJS challenge solving, cookies, proxies, and Whisper.
-
 Every attempt and selected source is recorded in `receipt.json`. Missing data remains `NOT_PROVEN`; it is never silently described as complete.
 
-## Local CLI
+## Optional local CLI
 
-Python 3.10 or newer:
+The private GitHub setup does not require a local installation. For local use, Python 3.10 or newer:
 
 ```bash
 pipx install git+https://github.com/organicoverlords/AITubeTranscript.git
@@ -182,21 +150,19 @@ pipx install "git+https://github.com/organicoverlords/AITubeTranscript.git#egg=a
 aitube-transcript VIDEO_URL --whisper --whisper-model tiny
 ```
 
-Local outputs remain under `results/<video-id>/` unless the user deliberately uploads them.
-
 ## Cookies and restricted videos
 
-For local use only, export Netscape-format cookies and pass:
+Cookies are supported only for deliberate local use:
 
 ```bash
 aitube-transcript VIDEO_URL --cookies /path/to/cookies.txt
 ```
 
-Never commit cookies. They can grant access to a YouTube account. Official private GitHub setup does not require or distribute cookies.
+Never commit cookies. They can grant access to a YouTube account. The official private GitHub setup does not require or distribute them.
 
 ## Privacy boundaries
 
-- Public repository: source, tests, documentation, reusable workflow.
+- Public repository: source, tests, documentation, templates, reusable workflow.
 - Private repository: request file, Actions logs, generated research, API secret.
 - Public workflow execution: rejected.
 - Transcript artifacts: not uploaded through GitHub Actions artifacts.
