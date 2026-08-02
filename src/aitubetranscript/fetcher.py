@@ -10,8 +10,14 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from yt_dlp import YoutubeDL
 
 from .captions import fetch_caption_document, parse_json3, parse_vtt, select_caption_track
-from .frontends import fetch_invidious_data, fetch_oembed, fetch_transcript_proxy
+from .frontends import (
+    fetch_invidious_data,
+    fetch_oembed,
+    fetch_transcript_proxy,
+    fetch_youtube_data_api,
+)
 from .models import CommentData, ResearchBundle, TranscriptData, TranscriptSegment
+from .piped import fetch_piped_data
 from .youtube import canonical_url, extract_video_id
 
 
@@ -26,6 +32,7 @@ class FetchOptions:
     whisper_model: str = "tiny"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    youtube_api_key: str | None = None
 
 
 def fetch_youtube(value: str, options: FetchOptions | None = None) -> ResearchBundle:
@@ -36,7 +43,6 @@ def fetch_youtube(value: str, options: FetchOptions | None = None) -> ResearchBu
     attempts: list[dict[str, Any]] = []
 
     info = _fetch_metadata(url, options, attempts, warnings)
-    _enrich_metadata(video_id, url, info, options, attempts)
 
     transcript = _fetch_transcript_api(video_id, options, attempts)
     if transcript is None:
@@ -55,14 +61,16 @@ def fetch_youtube(value: str, options: FetchOptions | None = None) -> ResearchBu
             "No transcript was retrieved. Enable --whisper for audio transcription fallback."
         )
 
+    _enrich_metadata_and_comments(video_id, url, info, options, attempts)
     comments = _normalize_comments(info.get("comments") or [], options.comment_limit)
     if options.include_comments and not comments:
         warnings.append(
-            "No comments were returned; YouTube may have disabled or blocked comment extraction."
+            "No comments were returned. Configure YOUTUBE_API_KEY, use a working public "
+            "frontend, or run locally with cookies."
         )
 
     return ResearchBundle(
-        schema_version="1.0",
+        schema_version="1.1",
         fetched_at=datetime.now(timezone.utc).isoformat(),
         video_id=video_id,
         canonical_url=url,
@@ -74,32 +82,49 @@ def fetch_youtube(value: str, options: FetchOptions | None = None) -> ResearchBu
     )
 
 
-def _enrich_metadata(
+def _enrich_metadata_and_comments(
     video_id: str,
     url: str,
     info: dict[str, Any],
     options: FetchOptions,
     attempts: list[dict[str, Any]],
 ) -> None:
-    if not info.get("title"):
-        _merge_missing(info, fetch_oembed(url, attempts))
-
-    needs_frontend = (
-        not info.get("title")
-        or not info.get("description")
-        or (options.include_comments and not info.get("comments"))
-    )
-    if not needs_frontend:
-        return
-
-    metadata, comments = fetch_invidious_data(
+    api_metadata, api_comments = fetch_youtube_data_api(
         video_id,
+        options.youtube_api_key,
         options.comment_limit if options.include_comments else 0,
         attempts,
     )
-    _merge_missing(info, metadata)
-    if options.include_comments and comments and not info.get("comments"):
-        info["comments"] = comments
+    _merge_missing(info, api_metadata)
+    if options.include_comments and api_comments and not info.get("comments"):
+        info["comments"] = api_comments
+
+    if not info.get("title"):
+        _merge_missing(info, fetch_oembed(url, attempts))
+
+    needs_metadata = not info.get("description")
+    needs_comments = options.include_comments and not info.get("comments")
+    if needs_metadata or needs_comments:
+        piped_metadata, piped_comments = fetch_piped_data(
+            video_id,
+            options.comment_limit if needs_comments else 0,
+            attempts,
+        )
+        _merge_missing(info, piped_metadata)
+        if piped_comments and not info.get("comments"):
+            info["comments"] = piped_comments
+
+    needs_metadata = not info.get("description")
+    needs_comments = options.include_comments and not info.get("comments")
+    if needs_metadata or needs_comments:
+        frontend_metadata, frontend_comments = fetch_invidious_data(
+            video_id,
+            options.comment_limit if needs_comments else 0,
+            attempts,
+        )
+        _merge_missing(info, frontend_metadata)
+        if frontend_comments and not info.get("comments"):
+            info["comments"] = frontend_comments
 
 
 def _merge_missing(target: dict[str, Any], fallback: dict[str, Any]) -> None:
@@ -259,9 +284,9 @@ def _fetch_from_yt_dlp_tracks(
         )
         return None
     language_code, track, generated = selected
-    url = track.get("url")
+    track_url = track.get("url")
     extension = track.get("ext")
-    if not url:
+    if not track_url:
         attempts.append(
             {
                 "source": "yt-dlp caption track",
@@ -271,7 +296,7 @@ def _fetch_from_yt_dlp_tracks(
         )
         return None
     try:
-        payload = fetch_caption_document(url)
+        payload = fetch_caption_document(track_url)
         source = f"yt-dlp {'automatic' if generated else 'manual'} captions"
         transcript = (
             parse_json3(payload, source, language_code)
