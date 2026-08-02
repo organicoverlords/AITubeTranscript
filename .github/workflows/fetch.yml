@@ -45,6 +45,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - run: python -m pip install .
       - id: request
         run: aitube-request "$GITHUB_EVENT_PATH"
