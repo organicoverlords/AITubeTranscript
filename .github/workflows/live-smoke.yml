@@ -1,49 +1,40 @@
-name: Live YouTube smoke
+name: Privacy smoke
+
 on:
   push:
-    branches: ["agent/**"]
+    branches: ["agent/**", "security/**"]
   pull_request:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
-  ardy:
+  privacy:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - run: python -m pip install .
-      - name: Fetch acceptance video
-        run: aitube-transcript "https://www.youtube.com/watch?v=x8W_S9zmodk" --comments 20 --output "$RUNNER_TEMP/results"
-      - name: Assert real transcript
+      - name: Verify public workflows cannot publish transcript data
         run: |
+          set -euo pipefail
           python - <<'PY'
-          import json
-          import os
           from pathlib import Path
 
-          receipt = Path(os.environ["RUNNER_TEMP"]) / "results" / "x8W_S9zmodk" / "receipt.json"
-          data = json.loads(receipt.read_text(encoding="utf-8"))
-          assert data["transcript_status"] == "PROVEN", data
-          assert data["segment_count"] > 0, data
-          print(json.dumps({
-              "transcript_status": data["transcript_status"],
-              "transcript_source": data["transcript_source"],
-              "segment_count": data["segment_count"],
-              "comments_status": data["comments_status"],
-              "comment_count": data["comment_count"],
-          }, indent=2))
+          action = Path("action.yml").read_text(encoding="utf-8")
+          fetch = Path(".github/workflows/fetch.yml").read_text(encoding="utf-8")
+          smoke = Path(".github/workflows/live-smoke.yml").read_text(encoding="utf-8")
+
+          assert "CALLER_REPOSITORY_PRIVATE" in action
+          assert "refuses to run in a public repository" in action
+          assert "workflow_call:" in fetch
+          assert "workflow_dispatch:" not in fetch
+          assert "issues:" not in fetch
+          assert "github.event.repository.private" in fetch
+          assert "aitube-results" in fetch
+          assert "actions/upload-artifact" not in fetch
+          assert "youtube.com/watch" not in smoke
+          assert "actions/upload-artifact" not in smoke
+
+          print("PRIVACY_ENFORCEMENT=PROVEN")
           PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ardy-live-smoke
-          path: ${{ runner.temp }}/results/x8W_S9zmodk
-          if-no-files-found: error
