@@ -1,6 +1,6 @@
 # AITubeTranscript
 
-Fetch a YouTube video's **full available transcript**, metadata, description, and a bounded sample of comments. Every run writes human-readable files plus a machine-readable proof receipt.
+Fetch a YouTube video's **full available transcript**, metadata, description, and a bounded sample of comments. Every run writes human-readable files plus machine-readable proof receipts.
 
 The source code is public and reusable. **Supported GitHub execution is private-only:** requests, workflow logs, transcripts, descriptions, comments, and receipts must live in a private companion repository.
 
@@ -33,6 +33,23 @@ Metadata and comments use independent fallbacks:
 4. Public Piped and Invidious APIs.
 
 Each attempt and selected source is written to `receipt.json`. Missing data remains `NOT_PROVEN` rather than being represented as complete.
+
+## Complete transcript consumption proof
+
+Large transcript files can be truncated by API clients, chat connectors, or browser previews even when retrieval succeeded. Every successful run therefore produces three additional representations:
+
+- `transcript.jsonl` contains exactly one canonical JSON record per segment.
+- `chunks/001.md`, `chunks/002.md`, and so on contain bounded-size readable groups of whole segments.
+- `transcript-manifest.json` records every chunk range and hash, the JSONL hash, missing or duplicated indices, ordering, and an `exactly_once` result.
+
+Chunk files target at most 10,000 UTF-8 bytes and 40 segments. A single unusually large segment is kept whole and marked as an oversized single-segment chunk rather than silently split or omitted.
+
+`receipt.json` hashes every generated file, including nested chunk files, and reports `transcript_coverage_status`. A transcript is safe to claim as completely represented when both conditions hold:
+
+```text
+transcript_status = PROVEN
+transcript_coverage_status = PROVEN
+```
 
 ## Private GitHub setup
 
@@ -102,6 +119,12 @@ Outputs remain on the local machine:
 results/<video-id>/
 ├── transcript.md
 ├── transcript.txt
+├── transcript.jsonl
+├── transcript-manifest.json
+├── chunks/
+│   ├── 001.md
+│   ├── 002.md
+│   └── ...
 ├── description.md
 ├── comments.md
 ├── result.json
@@ -176,12 +199,13 @@ When direct YouTube retrieval fails, the tool may send only the public video ID 
 `receipt.json` includes:
 
 - transcript and comment status (`PROVEN` or `NOT_PROVEN`)
+- transcript coverage status (`PROVEN`, `REJECTED`, or `NOT_APPLICABLE`)
 - selected transcript source
-- segment and comment counts
+- segment, chunk, and comment counts
 - failed fallback attempts and warnings
-- SHA-256 hashes for generated files
+- SHA-256 hashes for every generated file
 
-A successful command does not automatically mean every data class was retrieved. Read the receipt statuses.
+A successful command does not automatically mean every data class was retrieved. Read the receipt and transcript manifest statuses.
 
 ## Legal and responsible use
 
