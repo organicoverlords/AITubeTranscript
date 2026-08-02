@@ -42,12 +42,15 @@ Issues = "https://github.com/organicoverlords/AITubeTranscript/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+aitubetranscript = ["*.ts"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 100
+line-length = 101
 target-version = "py310"
 
 [tool.ruff.lint]

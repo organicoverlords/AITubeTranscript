@@ -6,14 +6,23 @@ The project is public and reusable. It does not require a paid API key for norma
 
 ## Retrieval ladder
 
+Transcript retrieval runs first so unavailable metadata or comment services cannot delay a usable transcript:
+
 1. `youtube-transcript-api` for manual or automatic captions.
 2. Caption tracks exposed by `yt-dlp`, with Deno/EJS challenge solving and alternate non-web clients.
 3. The no-key `youtube-transcript.ai` edge endpoint when the runner's IP cannot reach YouTube captions directly.
-4. Optional `faster-whisper` audio transcription when captions do not exist.
+4. A second no-key hosted transcript fallback.
+5. Optional `faster-whisper` audio transcription when captions do not exist.
 
-Metadata and comments also fall back to YouTube oEmbed and public Invidious API instances. Each attempt and selected source is written to `receipt.json`.
+Metadata and comments use independent fallbacks:
 
-YouTube can still block cloud IPs or require authentication for some videos. The tool reports `NOT_PROVEN` rather than pretending a partial result is complete.
+1. Direct `yt-dlp` extraction.
+2. Optional official YouTube Data API using `YOUTUBE_API_KEY`.
+3. YouTube oEmbed for basic title/channel metadata.
+4. Public Piped `/streams` and `/comments` APIs.
+5. Public Invidious video and comment APIs.
+
+Each attempt and selected source is written to `receipt.json`. YouTube and public frontends can still block cloud IPs or temporarily fail. The tool reports `NOT_PROVEN` rather than pretending a partial result is complete.
 
 ## Fast local use
 
@@ -44,6 +53,26 @@ aitube-transcript VIDEO_URL --whisper --whisper-model tiny
 ```
 
 The first Whisper run downloads a model. CPU transcription is slower than caption retrieval.
+
+## Reliable descriptions and comments
+
+The Piped and Invidious routes require no key, but public instances can be unavailable. For the most reliable public description and top-level comment retrieval, create a YouTube Data API key and set:
+
+```bash
+export YOUTUBE_API_KEY="your-key"
+aitube-transcript VIDEO_URL --comments 100
+```
+
+Windows PowerShell:
+
+```powershell
+$env:YOUTUBE_API_KEY = "your-key"
+aitube-transcript VIDEO_URL --comments 100
+```
+
+The key is read from the environment or from `--youtube-api-key`. Never commit it.
+
+For GitHub Actions, add a repository Actions secret named `YOUTUBE_API_KEY`. The bundled fetch workflow uses it automatically when present and still works without it.
 
 ## GitHub-only use
 
@@ -78,6 +107,8 @@ After a stable release/tag exists, another repository can use:
 ```yaml
 - uses: organicoverlords/AITubeTranscript@v1
   id: youtube
+  env:
+    YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
   with:
     url: https://www.youtube.com/watch?v=x8W_S9zmodk
     languages: en,fi
@@ -109,7 +140,11 @@ Never commit cookies. They can grant access to your YouTube account.
 
 ## Third-party fallback privacy
 
-When direct YouTube retrieval fails, the tool may send only the public video ID and requested language to `youtube-transcript.ai`, the official Invidious instance registry, and eligible public Invidious instances. It never sends cookies to these fallback services. The chosen source is visible in the receipt.
+When direct YouTube retrieval fails, the tool may send only the public video ID and requested language to hosted transcript providers, Piped, the official Invidious instance registry, and eligible public Invidious instances. It never sends cookies or API keys to these fallback services. The chosen source is visible in the receipt.
+
+## Repository protection
+
+`main` includes CODEOWNERS, a destructive-change guard, SHA-256 integrity manifests, complete Git-bundle backups, and optional mirroring to a separate private repository. See `REPOSITORY_PROTECTION.md` for the branch-rules and deletion-recovery setup.
 
 ## What the receipt proves
 

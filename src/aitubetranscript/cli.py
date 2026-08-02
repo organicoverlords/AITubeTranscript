@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from .fetcher import FetchOptions, fetch_youtube
 from .output import write_bundle
+from .youtubejs import enrich_bundle_with_youtubejs
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-comments", action="store_true")
     parser.add_argument("--cookies", type=Path, help="Netscape cookies.txt path")
     parser.add_argument("--proxy", help="HTTP/HTTPS proxy URL")
+    parser.add_argument(
+        "--youtube-api-key",
+        default=os.environ.get("YOUTUBE_API_KEY"),
+        help="Optional YouTube Data API key; defaults to YOUTUBE_API_KEY",
+    )
     parser.add_argument(
         "--whisper", action="store_true", help="Transcribe audio when captions fail"
     )
@@ -46,9 +53,14 @@ def main(argv: list[str] | None = None) -> int:
         whisper_model=args.whisper_model,
         whisper_device=args.whisper_device,
         whisper_compute_type=args.whisper_compute_type,
+        youtube_api_key=args.youtube_api_key,
     )
     try:
         bundle = fetch_youtube(args.url, options)
+        enrich_bundle_with_youtubejs(
+            bundle,
+            options.comment_limit if options.include_comments else 0,
+        )
         destination = write_bundle(bundle, args.output)
     except Exception as exc:
         print(f"AITubeTranscript failed: {exc}", file=sys.stderr)
