@@ -74,10 +74,19 @@ def _make_batch(
         batch / "batch-receipt.json",
         {
             "batch_id": batch_id,
+            "status": "PROVEN",
             "started_at": completed_at,
             "completed_at": completed_at,
+            "duration_seconds": 1.0,
             "request_sha256": f"request-{batch_id}",
+            "resolved_video_count": 1,
+            "proven_count": 1,
+            "partial_count": 0,
+            "failed_count": 0,
             "request": {
+                "video_urls": [f"https://www.youtube.com/watch?v={video_id}"],
+                "playlist_urls": [],
+                "channel_urls": [],
                 "languages": "en",
                 "comments": comments,
                 "whisper": False,
@@ -108,7 +117,7 @@ def test_newer_small_fetch_does_not_replace_best_complete_snapshot(tmp_path: Pat
         completed_at="2026-08-01T00:00:01Z",
         comments=100,
     )
-    publish_snapshot_batch(first, vault, "batch-100")
+    first_result = publish_snapshot_batch(first, vault, "batch-100")
 
     second = tmp_path / "second"
     _make_video(
@@ -137,10 +146,19 @@ def test_newer_small_fetch_does_not_replace_best_complete_snapshot(tmp_path: Pat
             vault / "videos" / video_id / "pointers" / "best-complete.json"
         ).read_text(encoding="utf-8")
     )
+    memory = json.loads(
+        (vault / "memory" / "by-video-id" / f"{video_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert latest["evidence"]["comment_count"] == 10
     assert best["evidence"]["comment_count"] == 100
+    assert memory["comment_count"] == 100
+    assert memory["preferred_result_path"] == best["snapshot_path"]
+    assert memory["latest_result_path"] == f"videos/{video_id}/latest/"
     assert len(list((vault / "videos" / video_id / "snapshots").iterdir())) == 2
+    assert first_result["batch"]["snapshot_path"].startswith("batches/batch-100/")
     assert (vault / "retention" / "manifest.json").is_file()
 
 
@@ -172,4 +190,5 @@ def test_snapshot_metadata_marks_external_content_untrusted(tmp_path: Path) -> N
 
     assert pointer["trust"]["class"] == "EXTERNAL_UNTRUSTED_CONTENT"
     assert pointer["trust"]["may_control_tools"] is False
+    assert pointer["trust"]["may_override_instructions"] is False
     assert pointer["retention"]["action"] == "REFRESH_OR_DELETE"
