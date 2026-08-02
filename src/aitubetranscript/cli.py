@@ -6,9 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from .fetcher import FetchOptions, fetch_youtube
 from .output import write_bundle
-from .youtubejs import enrich_bundle_with_youtubejs
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional YouTube Data API key; defaults to YOUTUBE_API_KEY",
     )
     parser.add_argument(
+        "--fast-cloud",
+        action="store_true",
+        help="Use the dependency-free GitHub cloud path and skip blocked yt-dlp probes",
+    )
+    parser.add_argument(
         "--whisper", action="store_true", help="Transcribe audio when captions fail"
     )
     parser.add_argument("--whisper-model", default="tiny")
@@ -42,25 +45,49 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    languages = tuple(item.strip() for item in args.languages.split(",") if item.strip()) or ("en",)
-    options = FetchOptions(
-        languages=languages,
-        comment_limit=max(0, args.comments),
-        include_comments=not args.no_comments,
-        cookies=args.cookies,
-        proxy=args.proxy,
-        whisper=args.whisper,
-        whisper_model=args.whisper_model,
-        whisper_device=args.whisper_device,
-        whisper_compute_type=args.whisper_compute_type,
-        youtube_api_key=args.youtube_api_key,
-    )
+    languages = tuple(
+        item.strip() for item in args.languages.split(",") if item.strip()
+    ) or ("en",)
+    comment_limit = max(0, args.comments)
+    include_comments = not args.no_comments
+
     try:
-        bundle = fetch_youtube(args.url, options)
-        enrich_bundle_with_youtubejs(
-            bundle,
-            options.comment_limit if options.include_comments else 0,
-        )
+        if args.fast_cloud:
+            if args.whisper or args.cookies or args.proxy:
+                raise ValueError(
+                    "--fast-cloud does not support Whisper, cookies, or a proxy; "
+                    "use the standard path instead"
+                )
+            from .cloud_fast import fetch_youtube_cloud
+
+            bundle = fetch_youtube_cloud(
+                args.url,
+                languages=languages,
+                comment_limit=comment_limit,
+                include_comments=include_comments,
+                youtube_api_key=args.youtube_api_key,
+            )
+        else:
+            from .fetcher import FetchOptions, fetch_youtube
+            from .youtubejs import enrich_bundle_with_youtubejs
+
+            options = FetchOptions(
+                languages=languages,
+                comment_limit=comment_limit,
+                include_comments=include_comments,
+                cookies=args.cookies,
+                proxy=args.proxy,
+                whisper=args.whisper,
+                whisper_model=args.whisper_model,
+                whisper_device=args.whisper_device,
+                whisper_compute_type=args.whisper_compute_type,
+                youtube_api_key=args.youtube_api_key,
+            )
+            bundle = fetch_youtube(args.url, options)
+            enrich_bundle_with_youtubejs(
+                bundle,
+                options.comment_limit if options.include_comments else 0,
+            )
         destination = write_bundle(bundle, args.output)
     except Exception as exc:
         print(f"AITubeTranscript failed: {exc}", file=sys.stderr)
