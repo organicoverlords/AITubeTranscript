@@ -101,6 +101,33 @@ def test_chunked_outputs_cover_every_segment_exactly_once(tmp_path):
     assert receipt["transcript_chunk_count"] == manifest["chunk_count"]
 
 
+def test_rerun_removes_stale_chunk_files(tmp_path):
+    long_segments = [
+        TranscriptSegment(
+            text=f"Long segment {index} " + ("x" * 4_500),
+            start=float(index),
+            duration=1.0,
+        )
+        for index in range(1, 6)
+    ]
+    destination = write_bundle(_bundle(long_segments), tmp_path)
+    first_chunks = sorted((destination / "chunks").glob("*.md"))
+    assert len(first_chunks) > 1
+
+    short_segments = [
+        TranscriptSegment(text="Replacement", start=0.0, duration=1.0)
+    ]
+    destination = write_bundle(_bundle(short_segments), tmp_path)
+    manifest = json.loads((destination / "transcript-manifest.json").read_text())
+    remaining_chunks = sorted((destination / "chunks").glob("*.md"))
+
+    assert len(remaining_chunks) == 1
+    assert len(remaining_chunks) == manifest["chunk_count"]
+    assert remaining_chunks[0].name == "001.md"
+    assert "Replacement" in remaining_chunks[0].read_text()
+    assert "Long segment" not in remaining_chunks[0].read_text()
+
+
 def test_manifest_is_not_applicable_without_transcript(tmp_path):
     destination = write_bundle(_bundle(None), tmp_path)
     manifest = json.loads((destination / "transcript-manifest.json").read_text())
