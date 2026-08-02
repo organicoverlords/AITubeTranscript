@@ -125,6 +125,7 @@ def publish_snapshot_batch(
     retention_manifest = rebuild_retention_manifest(vault)
 
     from .memory_bank import update_memory_bank
+    from .memory_preference import promote_preferred_video_entries
 
     update_memory_bank(
         vault,
@@ -133,6 +134,14 @@ def publish_snapshot_batch(
         / batch_id
         / "latest"
         / "batch-receipt.json",
+    )
+    promote_preferred_video_entries(
+        vault,
+        [
+            str(result["video_id"])
+            for result in receipt.get("results") or []
+            if result.get("status") != "FAILED"
+        ],
     )
     return {
         "batch": batch_snapshot,
@@ -281,7 +290,12 @@ def _pointer_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     snapshot_key = str(metadata["snapshot_key"])
     kind = str(metadata["kind"])
     identity = str(metadata["identity"])
-    base = f"{kind}s/{identity}/snapshots/{snapshot_key}/"
+    plural = {"video": "videos", "channel": "channels", "batch": "batches"}.get(
+        kind
+    )
+    if plural is None:
+        raise ValueError(f"unsupported snapshot kind: {kind}")
+    base = f"{plural}/{identity}/snapshots/{snapshot_key}/"
     if kind == "video":
         receipt_name = "receipt.json"
         reader_name = "reader-manifest.json"
