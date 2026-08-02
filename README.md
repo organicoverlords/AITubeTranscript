@@ -1,14 +1,15 @@
 # AITubeTranscript
 
-**Private-first YouTube research for humans and GPT agents.** Fetch one video, many videos, playlists, or channel catalogs; keep generated research private; and prove exactly what was retrieved and read.
+**Private-first YouTube research and durable GitHub memory for humans and GPT agents.** Fetch one video, many videos, playlists, or channel catalogs; keep generated research private; prove exactly what was retrieved; and reuse prior results in future chats.
 
 AITubeTranscript collects transcripts, descriptions, metadata, and bounded top-level comments. It does **not** download or republish video or audio files.
 
-The source code is public. Official GitHub workflows reject public callers so requests, logs, transcripts, descriptions, comments, catalogs, and receipts remain in a private companion repository.
+The source code is public. Official GitHub workflows reject public callers so requests, logs, transcripts, descriptions, comments, catalogs, memory indexes, and receipts remain in a private companion repository.
 
 ## Start here
 
 - **Easiest setup through ChatGPT + MagicMusic:** [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md)
+- **Permanent GitHub memory bank:** [`MEMORY_BANK.md`](MEMORY_BANK.md)
 - **Multiple videos, playlists, and channels:** [`BATCH_USAGE.md`](BATCH_USAGE.md)
 - **Manual private setup:** [`INSTALL.md`](INSTALL.md)
 - **Canonical GPT execution contract:** [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md)
@@ -23,11 +24,12 @@ Read organicoverlords/AITubeTranscript/MAGICMUSIC_INSTALL.md and follow it compl
 The recommended architecture is intentionally simple:
 
 ```text
-public tool:     organicoverlords/AITubeTranscript
-private runner:  one private repository
-request branch:  request/aitube-live
-request file:    aitube-requests/current.json
-results branch:  aitube-results
+public tool:       organicoverlords/AITubeTranscript
+private runner:    one private repository
+request branch:    request/aitube-live
+request file:      aitube-requests/current.json
+results branch:    aitube-results
+memory indexes:    aitube-results/memory/
 ```
 
 You do not need to fork or modify this public repository.
@@ -78,6 +80,9 @@ videos/<video-id>/latest/
 latest/
 ├── reader-manifest.json
 ├── receipt.json
+├── memory-entry.json
+├── memory-entry.md
+├── download-name.txt
 ├── description.md
 ├── transcript.md
 ├── transcript.txt
@@ -90,6 +95,14 @@ latest/
 ├── comment-chunks/
 └── result.json
 ```
+
+The stable automation path always uses the exact YouTube video ID. `download-name.txt` supplies a human-readable folder/archive name:
+
+```text
+YYYY-MM-DD__channel__title__VIDEO_ID__aitube-memory
+```
+
+This avoids ambiguous downloads while preserving the machine lookup ID.
 
 ### Channel catalog
 
@@ -111,9 +124,32 @@ batches/<request-id>/latest/
 
 The batch receipt accounts for every selected video, playlist expansion, channel catalog, duplicate removal, partial result, and failure.
 
+## Permanent private memory bank
+
+The optional post-fetch memory workflow creates a compact lookup layer on `aitube-results`:
+
+```text
+memory/
+├── bank-manifest.json
+├── video-index.jsonl
+├── video-index.md
+├── channel-index.jsonl
+├── channel-index.md
+├── batch-index.jsonl
+├── batch-index.md
+├── by-video-id/<VIDEO_ID>.json
+├── by-title/<DATE>__<CHANNEL>__<TITLE>__<VIDEO_ID>.json
+├── by-channel-id/<CHANNEL_ID>.json
+└── by-batch-id/<BATCH_ID>.json
+```
+
+Future ChatGPT sessions check the memory bank before fetching again. A known URL goes directly to `by-video-id`; title, channel, topic, and date lookups use the compact indexes. The stored pointer then leads to the exact receipt and reader manifest.
+
+ChatGPT memory stores only these stable repository paths and rules. Full transcripts and comments remain in private GitHub. See [`MEMORY_BANK.md`](MEMORY_BANK.md) for reuse-versus-refresh rules, proof requirements, logical naming, and the complete memory instruction.
+
 ## Private GitHub installation
 
-Use [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md) when MagicMusic is available. ChatGPT creates the private repository, installs the current batch-capable request workflow, creates the request branch, configures Actions permissions, and verifies the result. The user performs only the API-key secret step.
+Use [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md) when MagicMusic is available. ChatGPT creates the private repository, installs the current batch-capable request workflow and memory-bank workflow, creates the request branch, configures Actions permissions, and verifies the result. The user performs only the API-key secret step.
 
 Use [`INSTALL.md`](INSTALL.md) for the equivalent manual setup.
 
@@ -124,16 +160,18 @@ public tool:     organicoverlords/AITubeTranscript
 private runner:  organicoverlords/all
 request branch:  request/aitube-live
 results branch:  aitube-results
+memory root:     aitube-results/memory/
 ```
 
 ## GPT-optimized operation
 
-GPT updates one private request file, polls one private receipt, verifies the manifests, and opens every file required by the appropriate reader manifest.
+GPT checks the private memory bank first. When stored material cannot satisfy the request, GPT updates one private request file, polls one private receipt, verifies the manifests, and opens every file required by the appropriate reader manifest.
 
 Workflow success is not proof that every word was read. GPT may claim complete reading only after it has opened every required reader file and the relevant coverage manifests are proven.
 
 Use:
 
+- [`MEMORY_BANK.md`](MEMORY_BANK.md) for permanent external-memory lookup and refresh rules.
 - [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md) for exact request, polling, batch, catalog, proof, timing, fallback, and privacy rules.
 - [`GPT_MEMORY.md`](GPT_MEMORY.md) for the stable instruction to save in ChatGPT memory.
 
@@ -165,10 +203,11 @@ Retrieval representation is different from transcription accuracy. Automatic cap
 
 The optimized GitHub path uses:
 
-1. YouTube Data API for playlists, channel uploads, descriptions, durations, publication dates, statistics, and comments
-2. available caption and public transcript endpoints
-3. repository fallback sources when the fast path fails
-4. optional Whisper only when captions cannot be retrieved
+1. the private GitHub memory bank for already retrieved material
+2. YouTube Data API for playlists, channel uploads, descriptions, durations, publication dates, statistics, and comments
+3. available caption and public transcript endpoints
+4. repository fallback sources when the fast path fails
+5. optional Whisper only when captions cannot be retrieved
 
 Every attempt and selected source is recorded. Missing data remains `NOT_PROVEN`; it is never silently described as complete.
 
@@ -198,6 +237,12 @@ Channel catalog:
 aitube-channel "https://www.youtube.com/@CHANNEL_HANDLE" --max-videos 5000
 ```
 
+Rebuild a checked-out private memory bank:
+
+```bash
+aitube-memory-bank --vault /path/to/aitube-results --rebuild-all
+```
+
 Set the API key locally for playlists, channel catalogs, reliable descriptions, and comments:
 
 ```bash
@@ -220,7 +265,7 @@ aitube-transcript VIDEO_URL --whisper --whisper-model tiny
 ## Privacy boundaries
 
 - Public repository: source, tests, documentation, templates, reusable workflows.
-- Private repository: request files, Actions logs, generated research, channel catalogs, receipts, API secret.
+- Private repository: request files, Actions logs, generated research, channel catalogs, receipts, memory indexes, API secret.
 - Public workflow execution: rejected.
 - Generated research is not uploaded as public GitHub Actions artifacts.
 - API keys and cookies are never included in generated files.
