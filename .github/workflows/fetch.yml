@@ -39,6 +39,7 @@ jobs:
     timeout-minutes: 45
     env:
       ALLOW_PUBLIC_REQUESTS: ${{ vars.ALLOW_PUBLIC_REQUESTS || 'false' }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
