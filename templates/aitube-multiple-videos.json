@@ -1,0 +1,12 @@
+{
+  "request_id": "replace-with-a-unique-batch-id",
+  "video_urls": [
+    "https://www.youtube.com/watch?v=VIDEO_ID_ONE",
+    "https://www.youtube.com/watch?v=VIDEO_ID_TWO"
+  ],
+  "languages": "en",
+  "comments": 100,
+  "whisper": false,
+  "max_videos": 100,
+  "concurrency": 4
+}
