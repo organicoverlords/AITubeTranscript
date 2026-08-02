@@ -6,6 +6,48 @@ import subprocess
 from importlib.resources import as_file, files
 from typing import Any
 
+from .models import CommentData, ResearchBundle
+
+
+def enrich_bundle_with_youtubejs(
+    bundle: ResearchBundle,
+    comment_limit: int,
+) -> None:
+    """Fill missing public metadata/comments using YouTube.js when Deno is available."""
+    needs_description = not bundle.metadata.get("description")
+    needs_comments = comment_limit > 0 and not bundle.comments
+    if not needs_description and not needs_comments:
+        return
+
+    metadata, raw_comments = fetch_youtubejs_data(
+        bundle.video_id,
+        comment_limit if needs_comments else 0,
+        bundle.attempts,
+    )
+    for key, value in metadata.items():
+        if value not in (None, "", []) and not bundle.metadata.get(key):
+            bundle.metadata[key] = value
+
+    if needs_comments and raw_comments:
+        bundle.comments = [
+            CommentData(
+                author=_optional_text(item.get("author")),
+                text=str(item.get("text") or "").strip(),
+                like_count=_optional_int(item.get("like_count")),
+                timestamp=None,
+                parent=_optional_text(item.get("parent")),
+            )
+            for item in raw_comments[:comment_limit]
+            if str(item.get("text") or "").strip()
+        ]
+
+    if bundle.comments:
+        bundle.warnings = [
+            warning
+            for warning in bundle.warnings
+            if not warning.startswith("No comments were returned")
+        ]
+
 
 def fetch_youtubejs_data(
     video_id: str,
@@ -93,3 +135,15 @@ def fetch_youtubejs_data(
         }
     )
     return metadata, comments
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
