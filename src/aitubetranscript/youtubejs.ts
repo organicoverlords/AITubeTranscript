@@ -19,7 +19,7 @@ function textValue(value: unknown): string | null {
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
-    for (const key of ["text", "name", "title", "content"]) {
+    for (const key of ["text", "name", "title", "content", "simpleText"]) {
       const candidate = textValue(record[key]);
       if (candidate) return candidate;
     }
@@ -63,6 +63,64 @@ function authorName(author: unknown): string | null {
   return textValue(record.name) ?? textValue(record.title) ?? textValue(author);
 }
 
+function addCommentCandidate(
+  item: Record<string, unknown>,
+  output: Array<Record<string, unknown>>,
+): void {
+  if (output.length >= commentLimit) return;
+  const text = [
+    "commentText",
+    "contentText",
+    "comment",
+    "content",
+    "message",
+    "text",
+  ]
+    .map((key) => textValue(item[key]))
+    .find(Boolean);
+  if (!text || text.length < 2) return;
+
+  const id = textValue(item.commentId) ?? textValue(item.comment_id) ?? textValue(item.id);
+  const fingerprint = `${id ?? ""}\u0000${text}`;
+  if (commentFingerprints.has(fingerprint)) return;
+  commentFingerprints.add(fingerprint);
+
+  output.push({
+    author: authorName(item.author) ?? textValue(item.authorName) ?? textValue(item.authorText),
+    text,
+    like_count: numericValue(item.likeCount) ?? numericValue(item.like_count) ?? numericValue(item.likes),
+    published_time: textValue(item.publishedTime) ?? textValue(item.published_time) ?? textValue(item.time),
+    comment_id: id,
+    parent: textValue(item.parent),
+  });
+}
+
+function collectCommentCandidates(
+  value: unknown,
+  output: Array<Record<string, unknown>>,
+  seen: WeakSet<object>,
+  depth = 0,
+): void {
+  if (value == null || output.length >= commentLimit || depth > 10) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectCommentCandidates(item, output, seen, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  const record = value as Record<string, unknown>;
+  addCommentCandidate(record, output);
+  for (const [key, child] of Object.entries(record)) {
+    if (["commentText", "contentText", "comment", "content", "message", "text"].includes(key)) {
+      continue;
+    }
+    collectCommentCandidates(child, output, seen, depth + 1);
+  }
+}
+
+const commentFingerprints = new Set<string>();
 const output: {
   metadata: Record<string, unknown>;
   comments: Array<Record<string, unknown>>;
@@ -80,7 +138,7 @@ try {
   });
 
   try {
-    const info = await youtube.getBasicInfo(videoId, { client: "TV" });
+    const info = await youtube.getInfo(videoId);
     const basic = info.basic_info;
     output.metadata = {
       id: videoId,
@@ -109,21 +167,41 @@ try {
           const comment = thread.comment;
           const content = textValue(comment?.content);
           if (!content) continue;
-          output.comments.push({
-            author: authorName(comment?.author),
-            text: content,
-            like_count: numericValue(comment?.like_count),
-            published_time: textValue(comment?.published_time),
-            comment_id: comment?.comment_id ?? null,
-            parent: null,
-          });
+          addCommentCandidate(
+            {
+              author: comment?.author,
+              text: content,
+              like_count: comment?.like_count,
+              published_time: comment?.published_time,
+              comment_id: comment?.comment_id,
+              parent: null,
+            },
+            output.comments,
+          );
           if (output.comments.length >= commentLimit) break;
         }
         if (output.comments.length >= commentLimit || !commentsPage.has_continuation) break;
         commentsPage = await commentsPage.getContinuation();
       }
     } catch (error) {
-      output.warnings.push(`comments: ${error instanceof Error ? error.message : String(error)}`);
+      output.warnings.push(`youtubei-comments: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (output.comments.length === 0) {
+      try {
+        const scraperModule = await import("npm:@freetube/yt-comment-scraper@6.0.0");
+        const scraper = (scraperModule.default ?? scraperModule) as {
+          getComments: (args: Record<string, unknown>) => Promise<unknown>;
+        };
+        const result = await scraper.getComments({
+          videoId,
+          sortByNewest: false,
+          continuation: "",
+        });
+        collectCommentCandidates(result, output.comments, new WeakSet<object>());
+      } catch (error) {
+        output.warnings.push(`freetube-comments: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 } catch (error) {
