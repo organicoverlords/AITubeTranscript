@@ -64,8 +64,8 @@ jobs:
             exit 1
           }
 
-      - name: Check out public tool only
-        uses: actions/checkout@v4
+      - name: Check out pinned public tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: organicoverlords/AITubeTranscript
           ref: ${{ inputs.tool_ref }}
@@ -75,7 +75,7 @@ jobs:
       - name: Prove dependency-free batch runtime
         run: |
           python3 -S -c \
-            "import aitubetranscript.batch, aitubetranscript.channel; print('BATCH_IMPORT=PROVEN')"
+            "import aitubetranscript.batch, aitubetranscript.channel, aitubetranscript.snapshot_store; print('BATCH_IMPORT=PROVEN')"
 
       - name: Validate private request
         env:
@@ -199,7 +199,7 @@ jobs:
           print("BATCH_ACCOUNTING=PROVEN")
           PY
 
-      - name: Publish batch, channel, and video bundles privately
+      - name: Publish snapshots, retention, and memory atomically
         env:
           BATCH_ID: ${{ steps.batch.outputs.batch_id }}
           GH_TOKEN: ${{ github.token }}
@@ -233,58 +233,30 @@ jobs:
               ).read_text(encoding="utf-8")
           )
           print("/README.md")
-          print(f"/batches/{receipt['batch_id']}/latest/")
+          print("/memory/")
+          print("/retention/")
+          print(f"/batches/{receipt['batch_id']}/")
           for channel in receipt["channel_catalogs"]:
-              print(f"/channels/{channel['channel_id']}/latest/")
+              print(f"/channels/{channel['channel_id']}/")
           for result in receipt["results"]:
               if result["status"] != "FAILED":
-                  print(f"/videos/{result['video_id']}/latest/")
+                  print(f"/videos/{result['video_id']}/")
           PY
             git checkout -q -B aitube-results FETCH_HEAD
           else
             git checkout -q --orphan aitube-results
-            printf '# Private AITube results\n\nGenerated bundles are private.\n' \
-              > README.md
+            printf '# Private AITube results and memory bank\n' > README.md
           fi
 
-          python3 -S - <<'PY'
-          import json
-          import os
-          import shutil
-          from pathlib import Path
+          python3 -S -m aitubetranscript.snapshot_store \
+            --source-root "$RUNNER_TEMP/results" \
+            --vault "$RUNNER_TEMP/vault" \
+            --batch-id "$BATCH_ID"
 
-          source_root = Path(os.environ["RUNNER_TEMP"]) / "results"
-          vault = Path(os.environ["RUNNER_TEMP"]) / "vault"
-          batch_id = os.environ["BATCH_ID"]
-          receipt = json.loads(
-              (source_root / "batches" / batch_id / "batch-receipt.json").read_text(
-                  encoding="utf-8"
-              )
-          )
-
-          batch_target = vault / "batches" / batch_id / "latest"
-          shutil.rmtree(batch_target, ignore_errors=True)
-          shutil.copytree(source_root / "batches" / batch_id, batch_target)
-
-          for channel in receipt["channel_catalogs"]:
-              channel_id = channel["channel_id"]
-              channel_target = vault / "channels" / channel_id / "latest"
-              shutil.rmtree(channel_target, ignore_errors=True)
-              shutil.copytree(source_root / "channels" / channel_id, channel_target)
-
-          for result in receipt["results"]:
-              if result["status"] == "FAILED":
-                  continue
-              video_id = result["video_id"]
-              video_target = vault / "videos" / video_id / "latest"
-              shutil.rmtree(video_target, ignore_errors=True)
-              shutil.copytree(source_root / video_id, video_target)
-          PY
-
-          git add README.md batches
+          git add README.md memory retention batches
           test ! -d channels || git add channels
           test ! -d videos || git add videos
-          git commit -m "Private batch $BATCH_ID" || true
+          git commit -m "Private snapshot batch $BATCH_ID" || true
           git push origin HEAD:aitube-results
 
       - name: Fail after publishing incomplete batch evidence
