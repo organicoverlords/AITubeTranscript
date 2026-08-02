@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aitube-transcript"
 version = "0.1.0"
-description = "Fetch YouTube transcripts, metadata, descriptions, and comments with reproducible receipts."
+description = "Private-first YouTube transcript, description, comment, and coverage-proof research for humans and GPT agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
