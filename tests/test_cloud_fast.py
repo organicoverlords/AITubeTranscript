@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from aitubetranscript import cloud_fast
@@ -88,3 +89,38 @@ def test_fetch_youtube_cloud_builds_complete_bundle(monkeypatch):
     assert bundle.metadata["description"] == "Description"
     assert [comment.text for comment in bundle.comments] == ["First", "Second"]
     assert bundle.attempts[0] == {"source": "fast cloud path", "ok": True}
+
+
+def test_cloud_transcript_and_api_fetches_run_concurrently(monkeypatch):
+    barrier = threading.Barrier(2, timeout=2.0)
+    transcript = TranscriptData(
+        source="edge:test",
+        language="English",
+        language_code="en",
+        is_generated=False,
+        segments=[TranscriptSegment(text="Text", start=0.0, duration=1.0)],
+    )
+
+    def fetch_transcript(video_id, languages, attempts):
+        barrier.wait()
+        return transcript
+
+    def fetch_api(video_id, key, limit, attempts):
+        barrier.wait()
+        return {
+            "id": video_id,
+            "title": "Title",
+            "description": "Description",
+        }, []
+
+    monkeypatch.setattr(cloud_fast, "fetch_transcript_proxy", fetch_transcript)
+    monkeypatch.setattr(cloud_fast, "fetch_youtube_data_api", fetch_api)
+
+    bundle = cloud_fast.fetch_youtube_cloud(
+        "x8W_S9zmodk",
+        youtube_api_key="test-key",
+        include_comments=False,
+    )
+
+    assert bundle.transcript is transcript
+    assert bundle.metadata["description"] == "Description"

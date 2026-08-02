@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,8 +31,30 @@ def fetch_youtube_cloud(
     ]
     warnings: list[str] = []
     info: dict[str, Any] = {"id": video_id, "webpage_url": url}
+    requested_comments = max(0, comment_limit) if include_comments else 0
 
-    transcript = fetch_transcript_proxy(video_id, languages, attempts)
+    transcript_attempts: list[dict[str, Any]] = []
+    api_attempts: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="aitube-cloud") as executor:
+        transcript_future = executor.submit(
+            fetch_transcript_proxy,
+            video_id,
+            languages,
+            transcript_attempts,
+        )
+        api_future = executor.submit(
+            fetch_youtube_data_api,
+            video_id,
+            youtube_api_key,
+            requested_comments,
+            api_attempts,
+        )
+        transcript = transcript_future.result()
+        api_metadata, comments = api_future.result()
+
+    attempts.extend(transcript_attempts)
+    attempts.extend(api_attempts)
+
     if transcript is not None:
         warnings.append(
             "Transcript was retrieved through a third-party public edge service; "
@@ -42,13 +65,6 @@ def fetch_youtube_cloud(
             "No transcript was retrieved through the dependency-free cloud path."
         )
 
-    requested_comments = max(0, comment_limit) if include_comments else 0
-    api_metadata, comments = fetch_youtube_data_api(
-        video_id,
-        youtube_api_key,
-        requested_comments,
-        attempts,
-    )
     _merge_missing(info, api_metadata)
 
     if not info.get("title"):
