@@ -10,6 +10,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from yt_dlp import YoutubeDL
 
 from .captions import fetch_caption_document, parse_json3, parse_vtt, select_caption_track
+from .frontends import fetch_invidious_data, fetch_oembed, fetch_transcript_proxy
 from .models import CommentData, ResearchBundle, TranscriptData, TranscriptSegment
 from .youtube import canonical_url, extract_video_id
 
@@ -35,9 +36,18 @@ def fetch_youtube(value: str, options: FetchOptions | None = None) -> ResearchBu
     attempts: list[dict[str, Any]] = []
 
     info = _fetch_metadata(url, options, attempts, warnings)
+    _enrich_metadata(video_id, url, info, options, attempts)
+
     transcript = _fetch_transcript_api(video_id, options, attempts)
     if transcript is None:
         transcript = _fetch_from_yt_dlp_tracks(info, options, attempts)
+    if transcript is None:
+        transcript = fetch_transcript_proxy(video_id, options.languages, attempts)
+        if transcript is not None:
+            warnings.append(
+                "Transcript was retrieved through a third-party public edge service; "
+                "verify important quotations against the video."
+            )
     if transcript is None and options.whisper:
         transcript = _fetch_with_whisper(url, options, attempts)
     if transcript is None:
@@ -62,6 +72,40 @@ def fetch_youtube(value: str, options: FetchOptions | None = None) -> ResearchBu
         warnings=warnings,
         attempts=attempts,
     )
+
+
+def _enrich_metadata(
+    video_id: str,
+    url: str,
+    info: dict[str, Any],
+    options: FetchOptions,
+    attempts: list[dict[str, Any]],
+) -> None:
+    if not info.get("title"):
+        _merge_missing(info, fetch_oembed(url, attempts))
+
+    needs_frontend = (
+        not info.get("title")
+        or not info.get("description")
+        or (options.include_comments and not info.get("comments"))
+    )
+    if not needs_frontend:
+        return
+
+    metadata, comments = fetch_invidious_data(
+        video_id,
+        options.comment_limit if options.include_comments else 0,
+        attempts,
+    )
+    _merge_missing(info, metadata)
+    if options.include_comments and comments and not info.get("comments"):
+        info["comments"] = comments
+
+
+def _merge_missing(target: dict[str, Any], fallback: dict[str, Any]) -> None:
+    for key, value in fallback.items():
+        if value is not None and not target.get(key):
+            target[key] = value
 
 
 def _fetch_metadata(
@@ -96,12 +140,16 @@ def _fetch_metadata(
                 info = extracted
                 attempts.append({"source": profile_name, "ok": True})
                 break
-            attempts.append({"source": profile_name, "ok": False, "error": "empty result"})
+            attempts.append(
+                {"source": profile_name, "ok": False, "error": "empty result"}
+            )
         except Exception as exc:
             attempts.append({"source": profile_name, "ok": False, "error": str(exc)})
 
     if not info:
-        warnings.append("Core YouTube metadata extraction failed for every yt-dlp client profile.")
+        warnings.append(
+            "Core YouTube metadata extraction failed for every yt-dlp client profile."
+        )
         info = {"id": extract_video_id(url), "webpage_url": url}
 
     if options.include_comments:
@@ -112,7 +160,9 @@ def _fetch_metadata(
 
 
 def _fetch_comments(
-    url: str, options: FetchOptions, attempts: list[dict[str, Any]]
+    url: str,
+    options: FetchOptions,
+    attempts: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     params = _base_yt_dlp_params(options)
     params.update(
@@ -133,7 +183,11 @@ def _fetch_comments(
             extracted = downloader.extract_info(url, download=False) or {}
         comments = extracted.get("comments") or []
         attempts.append(
-            {"source": "yt-dlp comments", "ok": bool(comments), "count": len(comments)}
+            {
+                "source": "yt-dlp comments",
+                "ok": bool(comments),
+                "count": len(comments),
+            }
         )
         return comments
     except Exception as exc:
@@ -157,10 +211,15 @@ def _base_yt_dlp_params(options: FetchOptions) -> dict[str, Any]:
 
 
 def _fetch_transcript_api(
-    video_id: str, options: FetchOptions, attempts: list[dict[str, Any]]
+    video_id: str,
+    options: FetchOptions,
+    attempts: list[dict[str, Any]],
 ) -> TranscriptData | None:
     try:
-        fetched = YouTubeTranscriptApi().fetch(video_id, languages=list(options.languages))
+        fetched = YouTubeTranscriptApi().fetch(
+            video_id,
+            languages=list(options.languages),
+        )
         raw = fetched.to_raw_data()
         transcript = TranscriptData(
             source="youtube-transcript-api",
@@ -177,26 +236,38 @@ def _fetch_transcript_api(
                 if str(item.get("text", "")).strip()
             ],
         )
-        attempts.append({"source": "youtube-transcript-api", "ok": bool(transcript.segments)})
+        attempts.append(
+            {"source": "youtube-transcript-api", "ok": bool(transcript.segments)}
+        )
         return transcript if transcript.segments else None
     except Exception as exc:
-        attempts.append({"source": "youtube-transcript-api", "ok": False, "error": str(exc)})
+        attempts.append(
+            {"source": "youtube-transcript-api", "ok": False, "error": str(exc)}
+        )
         return None
 
 
 def _fetch_from_yt_dlp_tracks(
-    info: dict[str, Any], options: FetchOptions, attempts: list[dict[str, Any]]
+    info: dict[str, Any],
+    options: FetchOptions,
+    attempts: list[dict[str, Any]],
 ) -> TranscriptData | None:
     selected = select_caption_track(info, list(options.languages))
     if selected is None:
-        attempts.append({"source": "yt-dlp caption track", "ok": False, "error": "no track"})
+        attempts.append(
+            {"source": "yt-dlp caption track", "ok": False, "error": "no track"}
+        )
         return None
     language_code, track, generated = selected
     url = track.get("url")
     extension = track.get("ext")
     if not url:
         attempts.append(
-            {"source": "yt-dlp caption track", "ok": False, "error": "track has no URL"}
+            {
+                "source": "yt-dlp caption track",
+                "ok": False,
+                "error": "track has no URL",
+            }
         )
         return None
     try:
@@ -210,12 +281,16 @@ def _fetch_from_yt_dlp_tracks(
         attempts.append({"source": source, "ok": bool(transcript.segments)})
         return transcript if transcript.segments else None
     except Exception as exc:
-        attempts.append({"source": "yt-dlp caption track", "ok": False, "error": str(exc)})
+        attempts.append(
+            {"source": "yt-dlp caption track", "ok": False, "error": str(exc)}
+        )
         return None
 
 
 def _fetch_with_whisper(
-    url: str, options: FetchOptions, attempts: list[dict[str, Any]]
+    url: str,
+    options: FetchOptions,
+    attempts: list[dict[str, Any]],
 ) -> TranscriptData | None:
     try:
         from faster_whisper import WhisperModel
@@ -224,7 +299,10 @@ def _fetch_with_whisper(
             {
                 "source": "faster-whisper",
                 "ok": False,
-                "error": "optional dependency missing; install aitube-transcript[whisper]",
+                "error": (
+                    "optional dependency missing; install "
+                    "aitube-transcript[whisper]"
+                ),
             }
         )
         return None
@@ -252,7 +330,10 @@ def _fetch_with_whisper(
                 device=options.whisper_device,
                 compute_type=options.whisper_compute_type,
             )
-            segments_iter, details = model.transcribe(str(audio_path), vad_filter=True)
+            segments_iter, details = model.transcribe(
+                str(audio_path),
+                vad_filter=True,
+            )
             segments = [
                 TranscriptSegment(
                     text=segment.text.strip(),
@@ -305,6 +386,7 @@ def _clean_metadata(info: dict[str, Any]) -> dict[str, Any]:
         "uploader",
         "upload_date",
         "timestamp",
+        "published",
         "duration",
         "duration_string",
         "view_count",

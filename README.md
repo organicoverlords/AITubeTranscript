@@ -8,9 +8,12 @@ The project is public and reusable. It does not require a paid API key for norma
 
 1. `youtube-transcript-api` for manual or automatic captions.
 2. Caption tracks exposed by `yt-dlp`, with Deno/EJS challenge solving and alternate non-web clients.
-3. Optional `faster-whisper` audio transcription when captions do not exist.
+3. The no-key `youtube-transcript.ai` edge endpoint when the runner's IP cannot reach YouTube captions directly.
+4. Optional `faster-whisper` audio transcription when captions do not exist.
 
-YouTube can still block cloud IPs or require authentication for some videos, even with the challenge solver enabled. The tool records every attempted source and reports `NOT_PROVEN` rather than pretending a partial result is complete.
+Metadata and comments also fall back to YouTube oEmbed and public Invidious API instances. Each attempt and selected source is written to `receipt.json`.
+
+YouTube can still block cloud IPs or require authentication for some videos. The tool reports `NOT_PROVEN` rather than pretending a partial result is complete.
 
 ## Fast local use
 
@@ -103,6 +106,10 @@ aitube-transcript VIDEO_URL --cookies /path/to/cookies.txt
 ```
 
 Never commit cookies. They can grant access to your YouTube account.
+
+## Third-party fallback privacy
+
+When direct YouTube retrieval fails, the tool may send only the public video ID and requested language to `youtube-transcript.ai`, the official Invidious instance registry, and eligible public Invidious instances. It never sends cookies to these fallback services. The chosen source is visible in the receipt.
 
 ## What the receipt proves
 
