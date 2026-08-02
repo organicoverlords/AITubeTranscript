@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
 import json
+import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ CHUNK_MAX_SEGMENTS = 40
 def write_bundle(bundle: ResearchBundle, output_root: Path) -> Path:
     destination = output_root / bundle.video_id
     destination.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(destination / "chunks", ignore_errors=True)
 
     transcript_records = _transcript_records(bundle)
     transcript_jsonl = _transcript_jsonl(transcript_records)
