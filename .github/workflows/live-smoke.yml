@@ -33,7 +33,8 @@ jobs:
           assert "github.event.repository.private" in fetch
           assert "aitube-results" in fetch
           assert "actions/upload-artifact" not in fetch
-          assert "youtube.com/watch" not in smoke
+          assert "Fetch acceptance video" not in smoke
+          assert "aitube-transcript \"https:" not in smoke
           assert "actions/upload-artifact" not in smoke
 
           print("PRIVACY_ENFORCEMENT=PROVEN")
