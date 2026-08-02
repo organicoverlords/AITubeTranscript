@@ -7,10 +7,10 @@ The project is public and reusable. It does not require a paid API key for norma
 ## Retrieval ladder
 
 1. `youtube-transcript-api` for manual or automatic captions.
-2. Caption tracks exposed by `yt-dlp`.
+2. Caption tracks exposed by `yt-dlp`, with Deno/EJS challenge solving and alternate non-web clients.
 3. Optional `faster-whisper` audio transcription when captions do not exist.
 
-YouTube can block cloud IPs or require authentication for some videos. The tool records every attempted source and reports `NOT_PROVEN` rather than pretending a partial result is complete.
+YouTube can still block cloud IPs or require authentication for some videos, even with the challenge solver enabled. The tool records every attempted source and reports `NOT_PROVEN` rather than pretending a partial result is complete.
 
 ## Fast local use
 
