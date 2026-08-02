@@ -1,0 +1,101 @@
+name: Fetch YouTube research bundle
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: YouTube URL or video ID
+        required: true
+        type: string
+      languages:
+        description: Comma-separated language priority
+        required: false
+        default: en
+        type: string
+      comments:
+        description: Maximum top-level comments
+        required: false
+        default: "100"
+        type: string
+      whisper:
+        description: Use CPU Whisper fallback if captions are unavailable
+        required: false
+        default: false
+        type: boolean
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: youtube-fetch-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[fetch]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ALLOW_PUBLIC_REQUESTS: ${{ vars.ALLOW_PUBLIC_REQUESTS || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install .
+      - id: request
+        run: aitube-request "$GITHUB_EVENT_PATH"
+      - id: fetch
+        env:
+          VIDEO_URL: ${{ steps.request.outputs.video_url }}
+          LANGUAGES: ${{ steps.request.outputs.languages }}
+          COMMENTS: ${{ steps.request.outputs.comments }}
+          WHISPER: ${{ steps.request.outputs.whisper }}
+        run: |
+          set -euo pipefail
+          args=("$VIDEO_URL" --languages "$LANGUAGES" --comments "$COMMENTS" --output "$RUNNER_TEMP/results")
+          if [[ "$WHISPER" == "true" ]]; then
+            python -m pip install ".[whisper]"
+            args+=(--whisper)
+          fi
+          aitube-transcript "${args[@]}" | tee "$RUNNER_TEMP/run.txt"
+          cat "$RUNNER_TEMP/run.txt"
+      - name: Publish to results branch
+        env:
+          VIDEO_ID: ${{ steps.request.outputs.video_id }}
+        run: |
+          set -euo pipefail
+          result_dir="$RUNNER_TEMP/results/$VIDEO_ID"
+          test -f "$result_dir/receipt.json"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin results:refs/remotes/origin/results || true
+          if git show-ref --verify --quiet refs/remotes/origin/results; then
+            git switch --detach refs/remotes/origin/results
+            git switch -C results
+          else
+            git switch --orphan results
+            git rm -rf . || true
+            printf '# AITubeTranscript results\n\nGenerated research bundles.\n' > README.md
+          fi
+          mkdir -p "videos/$VIDEO_ID"
+          rm -rf "videos/$VIDEO_ID/latest"
+          mkdir -p "videos/$VIDEO_ID/latest"
+          cp -R "$result_dir/." "videos/$VIDEO_ID/latest/"
+          git add README.md "videos/$VIDEO_ID/latest"
+          git commit -m "Fetch $VIDEO_ID" || true
+          git push origin HEAD:results
+      - name: Comment result
+        if: github.event_name == 'issues' && always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VIDEO_ID: ${{ steps.request.outputs.video_id }}
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            gh issue comment "${{ github.event.issue.number }}" --body "Fetch complete: [transcript and research bundle](https://github.com/${{ github.repository }}/tree/results/videos/$VIDEO_ID/latest)"
+          else
+            gh issue comment "${{ github.event.issue.number }}" --body "Fetch failed. See [workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          fi
