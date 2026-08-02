@@ -1,23 +1,20 @@
 # Install the private GitHub setup
 
-This uses the same architecture as the working `organicoverlords` deployment:
+This mirrors the proven `organicoverlords` deployment:
 
 ```text
-public tool:     organicoverlords/AITubeTranscript
-private runner:  your private repository
-request branch:  request/aitube-live
-request file:    aitube-requests/current.json
-results branch:  aitube-results
-memory root:     aitube-results/memory/
+public tool:      organicoverlords/AITubeTranscript
+private runner:   your private repository
+request branch:   request/aitube-live
+request file:     aitube-requests/current.json
+results branch:   aitube-results
+memory root:      memory/
+retention root:   retention/
 ```
 
-You do **not** need to fork or modify the public tool repository.
+You do not need to fork the public repository.
 
-The installed workflows support one video, many videos, playlists, channel catalogs, and a permanent private memory bank for future ChatGPT sessions.
-
-## 1. Create a private repository
-
-Create one private GitHub repository for requests, workflow logs, transcripts, descriptions, comments, channel catalogs, receipts, and memory indexes.
+## 1. Create one private repository
 
 Example:
 
@@ -25,26 +22,22 @@ Example:
 YOUR_ACCOUNT/aitube-private
 ```
 
-The existing deployment uses:
+It stores private requests, workflow logs, immutable snapshots, transcripts, descriptions, comments, channel catalogs, memory indexes, and retention records.
 
-```text
-organicoverlords/all
-```
-
-## 2. Create the YouTube API key
+## 2. Create the API key
 
 In Google Cloud:
 
-1. Create or select a project.
-2. Enable **YouTube Data API v3**.
-3. Create an API key.
-4. Restrict the key to **YouTube Data API v3**.
+1. create or select a project;
+2. enable **YouTube Data API v3**;
+3. create an API key;
+4. restrict it to YouTube Data API v3.
 
-The key is used for playlist expansion, channel upload catalogs, descriptions, durations, publication metadata, statistics, and comments. Do not put it in the public repository or request file.
+Do not put the key in a request, commit, issue, log, or chat.
 
-## 3. Add the key to the private repository
+## 3. Add the private secret
 
-In the private GitHub repository, open:
+In the private repository:
 
 ```text
 Settings
@@ -56,78 +49,55 @@ Settings
 Create:
 
 ```text
-Name:  YOUTUBE_API_KEY
-Value: your API key
+YOUTUBE_API_KEY
 ```
 
-You add it once. Future runs use it automatically.
+## 4. Install three files
 
-## 4. Add the three private files
-
-On the private repository's `main` branch, copy:
+Copy from the public repository:
 
 ```text
-AITubeTranscript/templates/private-aitube-request.yml
+templates/private-aitube-request.yml
+  → .github/workflows/private-aitube-request.yml
+
+templates/private-aitube-memory-bank.yml
+  → .github/workflows/private-aitube-memory-bank.yml
+
+templates/aitube-request.json
+  → aitube-requests/current.json
 ```
 
-to:
+Commit them to `main`.
 
-```text
-.github/workflows/private-aitube-request.yml
-```
+The request workflow is the normal production path. It must call the reusable batch workflow at the exact pinned AITubeTranscript commit supplied by the current template. Do not replace a full commit SHA with `main`.
 
-Copy:
-
-```text
-AITubeTranscript/templates/private-aitube-memory-bank.yml
-```
-
-to:
-
-```text
-.github/workflows/private-aitube-memory-bank.yml
-```
-
-Then copy:
-
-```text
-AITubeTranscript/templates/aitube-request.json
-```
-
-to:
-
-```text
-aitube-requests/current.json
-```
-
-Commit all three files to `main`.
-
-The fetch workflow calls the reusable private batch workflow. The memory workflow runs after each fetch and can also be started manually to backfill existing results.
+The memory workflow is **manual repair-only**. Normal fetches already publish immutable snapshots, latest and best pointers, memory indexes, and retention records in one atomic transaction.
 
 ## 5. Create the request branch
 
-Create this branch from the private repository's current `main` branch:
+Create this branch from the validated `main` commit:
 
 ```text
 request/aitube-live
 ```
 
-The workflows and request file must exist before creating the branch.
+The workflow and request file must exist before creating the branch.
 
-## 6. Give GPT access to the private repository
+## 6. Enable Actions writes
 
-The GitHub connection used by GPT must be able to:
+Allow GitHub Actions to write repository contents. The private workflow needs this only to publish to `aitube-results`.
 
-- read the private repository
-- update `aitube-requests/current.json`
-- read the private `aitube-results` branch
-- read the compact `memory/` indexes
+The GitHub connection used by ChatGPT must be able to:
 
-Do not give GPT the API key itself. GitHub Actions reads the secret.
+- read the private repository;
+- update the request file on `request/aitube-live`;
+- read the private `aitube-results` branch.
 
-## 7. Run the first video
+It does not need the API-key value.
 
-On `request/aitube-live`, replace `aitube-requests/current.json` with:
+## 7. Run the first test
+
+On `request/aitube-live`, replace the request file with:
 
 ```json
 {
@@ -139,108 +109,100 @@ On `request/aitube-live`, replace `aitube-requests/current.json` with:
 }
 ```
 
-Commit directly to `request/aitube-live`. That starts the private fetch workflow. The memory workflow runs after it completes.
+Commit directly to the request branch.
 
-## 8. Check the result and memory pointer
+## 8. Verify the result
 
-First open:
+Open:
 
 ```text
 batches/first-test-001/latest/batch-receipt.json
-```
-
-Then open:
-
-```text
-videos/JsrwIGbuM8o/latest/receipt.json
+videos/JsrwIGbuM8o/pointers/best.json
+videos/JsrwIGbuM8o/pointers/latest.json
+memory/by-video-id/JsrwIGbuM8o.json
+retention/manifest.json
 ```
 
 Require:
 
 ```text
+batch accounting coverage = PROVEN
 transcript_status = PROVEN
 transcript_coverage_status = PROVEN
 comments_status = PROVEN
 comments_coverage_status = PROVEN
 ```
 
-The memory workflow should also create:
+Confirm that:
+
+- the video has an immutable `snapshots/<key>/` directory;
+- `best.json` and `latest.json` resolve to valid snapshots;
+- the memory pointer contains `preferred_result_path`;
+- the retention record contains `refresh_due_at` and `delete_or_refresh_by`;
+- all generated material remains on the private branch.
+
+## Normal use
+
+For each new request:
+
+1. check the memory bank first;
+2. fetch only when stored material cannot satisfy the request;
+3. update `aitube-requests/current.json` on `request/aitube-live`;
+4. poll the matching batch receipt;
+5. follow the preferred snapshot pointer;
+6. verify proof and retention;
+7. open every reader file before claiming complete reading.
+
+Request examples are in [`BATCH_USAGE.md`](BATCH_USAGE.md). GPT rules are in [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md).
+
+## Manual memory repair
+
+Run **Private AITube memory repair** manually only when indexes or pointers need rebuilding. It shares the same result-branch concurrency lock as normal publishing.
+
+Do not configure it as an automatic `workflow_run` task.
+
+## API retention
+
+New API-backed snapshots record a conservative refresh and delete-or-refresh deadline. The current system exposes the deadlines but does not yet claim automated refresh or purge.
+
+Review [`YOUTUBE_DATA_RETENTION.md`](YOUTUBE_DATA_RETENTION.md) and act before the recorded deadline.
+
+## Common failures
+
+### Workflow does not start
+
+Confirm the change was committed to:
 
 ```text
-memory/by-video-id/JsrwIGbuM8o.json
-memory/video-index.jsonl
-memory/video-index.md
-videos/JsrwIGbuM8o/latest/memory-entry.json
-videos/JsrwIGbuM8o/latest/download-name.txt
+request/aitube-live
 ```
 
-`download-name.txt` uses the logical format:
+and the path is exactly:
 
 ```text
-YYYY-MM-DD__channel__title__VIDEO_ID__aitube-memory
+aitube-requests/current.json
 ```
 
-Use stable video-ID paths for automation and logical names for downloaded folders or archives.
+### Publication fails
 
-## Normal future use
+Confirm Actions has repository-content write permission and that `aitube-results` is not protected against the GitHub Actions writer.
 
-For every request, GPT should:
+### API-backed data fails
 
-1. Check the private memory bank first.
-2. Reuse stored proven material when it satisfies the request.
-3. Start a new fetch only for missing content, failed proof, changed language/comment requirements, current statistics, new comments, or an explicit refresh.
-4. When fetching, update `aitube-requests/current.json` on `request/aitube-live` with a unique `request_id`.
-5. Poll and verify the matching private receipt and manifests.
-6. Let the post-fetch workflow update the permanent memory indexes.
+Confirm `YOUTUBE_API_KEY` exists and is restricted to YouTube Data API v3.
 
-Known video ID lookup:
+### Runtime imports fail
+
+Confirm the private workflow uses the exact pinned AITubeTranscript commit from the latest template. Do not use a stale pin or mutable branch name.
+
+## Existing `organicoverlords` deployment
 
 ```text
-memory/by-video-id/<VIDEO_ID>.json
+public tool:      organicoverlords/AITubeTranscript
+private runner:   organicoverlords/all
+request branch:   request/aitube-live
+results branch:   aitube-results
+secret:           YOUTUBE_API_KEY
 ```
 
-Title, channel, topic, or date lookup:
-
-```text
-memory/video-index.jsonl
-```
-
-Channel and batch lookup:
-
-```text
-memory/channel-index.jsonl
-memory/batch-index.jsonl
-```
-
-Complete memory rules are in [`MEMORY_BANK.md`](MEMORY_BANK.md). The copy-paste persistent instruction is in [`GPT_MEMORY.md`](GPT_MEMORY.md).
-
-## Common problems
-
-### Fetch workflow does not start
-
-Confirm the request was committed to `request/aitube-live` and the changed path is exactly `aitube-requests/current.json`.
-
-### Publishing to `aitube-results` fails
-
-Enable read/write workflow permissions for the private repository's GitHub Actions.
-
-### Memory bank does not update
-
-Run **Private AITube memory bank** manually from the private repository's Actions page. Confirm `aitube-results` exists and Actions has content write permission.
-
-### Playlists, channels, descriptions, or comments fail
-
-Confirm the private repository contains a valid `YOUTUBE_API_KEY` secret restricted to YouTube Data API v3.
-
-## Existing `organicoverlords` setup
-
-```text
-public tool:     organicoverlords/AITubeTranscript
-private runner:  organicoverlords/all
-request branch:  request/aitube-live
-results branch:  aitube-results
-memory root:     aitube-results/memory/
-secret:          YOUTUBE_API_KEY
-```
-
-Future GPT requests should use [`MEMORY_BANK.md`](MEMORY_BANK.md) first and [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md) only when a new fetch is required.
+It is upgraded in place; it does not need a fresh repository.
