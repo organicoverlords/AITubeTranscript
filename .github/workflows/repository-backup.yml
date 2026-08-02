@@ -22,7 +22,7 @@ jobs:
       BACKUP_REPOSITORY: ${{ vars.BACKUP_REPOSITORY || 'organicoverlords/all' }}
       BACKUP_PAT: ${{ secrets.BACKUP_PAT }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -41,7 +41,7 @@ jobs:
             echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > AITubeTranscript.backup.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: AITubeTranscript-recovery-${{ github.sha }}
           path: |

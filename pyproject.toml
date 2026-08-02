@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aitube-transcript"
-version = "0.3.0"
-description = "Private-first YouTube research and durable GitHub memory banks for humans and GPT agents."
+version = "0.4.0"
+description = "Private-first YouTube research with immutable snapshots, proof, retention records, and GPT memory."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -19,6 +19,8 @@ keywords = [
   "channel",
   "research",
   "memory",
+  "snapshots",
+  "provenance",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -44,6 +46,7 @@ aitube-transcript = "aitubetranscript.cli:main"
 aitube-batch = "aitubetranscript.batch:main"
 aitube-channel = "aitubetranscript.channel:main"
 aitube-memory-bank = "aitubetranscript.memory_bank:main"
+aitube-snapshot-store = "aitubetranscript.snapshot_store:main"
 aitube-request = "aitubetranscript.request:main"
 
 [project.urls]
