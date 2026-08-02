@@ -6,9 +6,16 @@ The source code is public. The supported GitHub workflow refuses public callers 
 
 ## Start here
 
-- **Install a setup like the working `organicoverlords` deployment:** [`INSTALL.md`](INSTALL.md)
+- **Easiest setup through ChatGPT + MagicMusic:** [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md)
+- **Manual setup like the working `organicoverlords` deployment:** [`INSTALL.md`](INSTALL.md)
 - **Canonical GPT execution contract:** [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md)
 - **Copy-paste ChatGPT memory instruction:** [`GPT_MEMORY.md`](GPT_MEMORY.md)
+
+For the easiest setup, tell ChatGPT only:
+
+```text
+Read organicoverlords/AITubeTranscript/MAGICMUSIC_INSTALL.md and follow it completely. Use my authenticated GitHub account and continue until you reach the API-key step or the installation is proven.
+```
 
 The recommended architecture is intentionally simple:
 
@@ -55,15 +62,9 @@ latest/
 
 ## Private GitHub installation
 
-Follow [`INSTALL.md`](INSTALL.md). It covers only the setup required for a deployment like ours:
+Use [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md) when MagicMusic is available. ChatGPT creates the private repository, installs the templates, creates the request branch, configures Actions permissions, and verifies the result. The user only performs the API-key secret step.
 
-1. create one private repository
-2. create and restrict one YouTube Data API key
-3. save it once as `YOUTUBE_API_KEY`
-4. copy the provided private workflow and request-file templates
-5. create `request/aitube-live`
-6. commit a YouTube request
-7. verify the private result
+Use [`INSTALL.md`](INSTALL.md) for the equivalent manual setup.
 
 The existing deployment already uses:
 
