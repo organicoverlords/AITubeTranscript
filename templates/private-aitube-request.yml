@@ -16,7 +16,7 @@ jobs:
     outputs:
       request_json: ${{ steps.read.outputs.request_json }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: read
         name: Read and compact request
@@ -47,5 +47,6 @@ jobs:
     uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@main
     with:
       request_json: ${{ needs.request.outputs.request_json }}
+      tool_ref: main
     secrets:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
