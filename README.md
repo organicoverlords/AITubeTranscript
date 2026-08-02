@@ -1,5 +1,121 @@
 # AITubeTranscript
 
-Public YouTube research bridge for retrieving transcripts, metadata, descriptions, and comments with reproducible proof receipts.
+Fetch a YouTube video's **full available transcript**, metadata, description, and a bounded sample of comments. Every run writes human-readable files plus a machine-readable proof receipt.
 
-Implementation is being added on a feature branch.
+The project is public and reusable. It does not require a paid API key for normal caption retrieval.
+
+## Retrieval ladder
+
+1. `youtube-transcript-api` for manual or automatic captions.
+2. Caption tracks exposed by `yt-dlp`.
+3. Optional `faster-whisper` audio transcription when captions do not exist.
+
+YouTube can block cloud IPs or require authentication for some videos. The tool records every attempted source and reports `NOT_PROVEN` rather than pretending a partial result is complete.
+
+## Fast local use
+
+Python 3.10 or newer:
+
+```bash
+pipx install git+https://github.com/organicoverlords/AITubeTranscript.git
+aitube-transcript "https://www.youtube.com/watch?v=x8W_S9zmodk" --languages en --comments 100
+```
+
+Outputs:
+
+```text
+results/<video-id>/
+├── transcript.md
+├── transcript.txt
+├── description.md
+├── comments.md
+├── result.json
+└── receipt.json
+```
+
+For videos without captions:
+
+```bash
+pipx install "git+https://github.com/organicoverlords/AITubeTranscript.git#egg=aitube-transcript[whisper]"
+aitube-transcript VIDEO_URL --whisper --whisper-model tiny
+```
+
+The first Whisper run downloads a model. CPU transcription is slower than caption retrieval.
+
+## GitHub-only use
+
+Fork the repository, open **Actions → Fetch YouTube research bundle → Run workflow**, paste a URL, and run it. Results are committed to the fork's `results` branch under:
+
+```text
+videos/<video-id>/latest/
+```
+
+This requires no local installation.
+
+### Issue-trigger mode
+
+Repository owners and collaborators can open an issue titled:
+
+```text
+[fetch] https://www.youtube.com/watch?v=x8W_S9zmodk
+```
+
+The workflow posts a result link back to the issue. Public issue execution is disabled by default to prevent strangers from consuming the repository owner's compute. A maintainer may explicitly enable it by creating the repository variable:
+
+```text
+ALLOW_PUBLIC_REQUESTS=true
+```
+
+Anyone can still fork the project and use their own Actions runner without that setting.
+
+## Reusable GitHub Action
+
+After a stable release/tag exists, another repository can use:
+
+```yaml
+- uses: organicoverlords/AITubeTranscript@v1
+  id: youtube
+  with:
+    url: https://www.youtube.com/watch?v=x8W_S9zmodk
+    languages: en,fi
+    comments: 100
+- uses: actions/upload-artifact@v4
+  with:
+    name: youtube-research
+    path: ${{ steps.youtube.outputs.output-directory }}
+```
+
+Until `v1` is tagged, pin to a commit SHA.
+
+## Docker
+
+```bash
+docker build -t aitube-transcript .
+docker run --rm -v "$PWD/results:/app/results" aitube-transcript VIDEO_URL
+```
+
+## Cookies and restricted videos
+
+Export a Netscape-format `cookies.txt` locally and pass:
+
+```bash
+aitube-transcript VIDEO_URL --cookies /path/to/cookies.txt
+```
+
+Never commit cookies. They can grant access to your YouTube account.
+
+## What the receipt proves
+
+`receipt.json` includes:
+
+- transcript and comment status (`PROVEN` or `NOT_PROVEN`)
+- selected transcript source
+- segment and comment counts
+- failed fallback attempts and warnings
+- SHA-256 hashes for generated files
+
+A successful command does not automatically mean every data class was retrieved. Read the receipt statuses.
+
+## Legal and responsible use
+
+Use the tool for videos you are allowed to access. Respect copyright, privacy, YouTube's terms, and applicable law. Transcripts and comments remain content from their respective creators; the MIT license applies to this software, not to downloaded content.
