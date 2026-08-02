@@ -27,6 +27,17 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Require a private caller repository
+      shell: bash
+      env:
+        CALLER_REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+      run: |
+        set -euo pipefail
+        if [[ "$CALLER_REPOSITORY_PRIVATE" != "true" ]]; then
+          echo "::error::AITubeTranscript GitHub Action refuses to run in a public repository."
+          echo "Create a private companion repository and call the reusable private workflow."
+          exit 1
+        fi
     - uses: denoland/setup-deno@v2
       with:
         deno-version: v2.x
