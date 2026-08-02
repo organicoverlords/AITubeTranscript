@@ -1,0 +1,10 @@
+{
+  "request_id": "replace-with-a-unique-playlist-id",
+  "playlist_url": "https://www.youtube.com/playlist?list=PLAYLIST_ID",
+  "playlist_start_index": 0,
+  "max_videos": 100,
+  "languages": "en",
+  "comments": 100,
+  "whisper": false,
+  "concurrency": 4
+}
