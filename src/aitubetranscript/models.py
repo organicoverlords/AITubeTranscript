@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .cleaning import clean_rolling_texts
+
 
 @dataclass(slots=True)
 class TranscriptSegment:
@@ -22,6 +24,18 @@ class TranscriptData:
     language_code: str | None
     is_generated: bool | None
     segments: list[TranscriptSegment] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        cleaned_texts = clean_rolling_texts([segment.text for segment in self.segments])
+        self.segments = [
+            TranscriptSegment(
+                text=cleaned_text,
+                start=segment.start,
+                duration=segment.duration,
+            )
+            for segment, cleaned_text in zip(self.segments, cleaned_texts, strict=True)
+            if cleaned_text
+        ]
 
 
 @dataclass(slots=True)
