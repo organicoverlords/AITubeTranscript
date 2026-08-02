@@ -44,15 +44,15 @@ def update_memory_bank(
 
     if rebuild_all:
         selected_video_ids.update(
-            path.parent.name
+            path.parent.parent.name
             for path in (vault / "videos").glob("*/latest/receipt.json")
         )
         selected_channel_ids.update(
-            path.parent.name
+            path.parent.parent.name
             for path in (vault / "channels").glob("*/latest/channel-receipt.json")
         )
         selected_batch_ids.update(
-            path.parent.name
+            path.parent.parent.name
             for path in (vault / "batches").glob("*/latest/batch-receipt.json")
         )
 
