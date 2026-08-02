@@ -13,6 +13,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
+from .channel import (
+    DEFAULT_CATALOG_MAX_VIDEOS,
+    MAX_CATALOG_VIDEOS,
+    fetch_channel_catalog,
+    write_channel_catalog,
+)
 from .output import write_bundle
 from .youtube import canonical_url, extract_video_id
 
@@ -66,9 +72,10 @@ def normalize_batch_request(request: dict[str, Any]) -> dict[str, Any]:
 
     video_urls = _combined_values(request, "video_url", "video_urls")
     playlist_urls = _combined_values(request, "playlist_url", "playlist_urls")
-    if not video_urls and not playlist_urls:
+    channel_urls = _combined_values(request, "channel_url", "channel_urls")
+    if not video_urls and not playlist_urls and not channel_urls:
         raise InvalidBatchRequest(
-            "Provide video_url, video_urls, playlist_url, or playlist_urls"
+            "Provide video_url(s), playlist_url(s), or channel_url(s)"
         )
 
     languages = str(request.get("languages", "en")).strip() or "en"
@@ -82,11 +89,23 @@ def normalize_batch_request(request: dict[str, Any]) -> dict[str, Any]:
         1,
         MAX_BATCH_VIDEOS,
     )
-    start_index = _bounded_int(
+    playlist_start_index = _bounded_int(
         request.get("playlist_start_index", 0),
         "playlist_start_index",
         0,
         1_000_000,
+    )
+    channel_start_index = _bounded_int(
+        request.get("channel_start_index", 0),
+        "channel_start_index",
+        0,
+        1_000_000,
+    )
+    catalog_max_videos = _bounded_int(
+        request.get("catalog_max_videos", DEFAULT_CATALOG_MAX_VIDEOS),
+        "catalog_max_videos",
+        1,
+        MAX_CATALOG_VIDEOS,
     )
     concurrency = _bounded_int(
         request.get("concurrency", DEFAULT_CONCURRENCY),
@@ -95,16 +114,24 @@ def normalize_batch_request(request: dict[str, Any]) -> dict[str, Any]:
         MAX_CONCURRENCY,
     )
     whisper = _as_bool(request.get("whisper", False), "whisper")
+    research_channel_videos = _as_bool(
+        request.get("research_channel_videos", False),
+        "research_channel_videos",
+    )
 
     return {
         "request_id": request_id,
         "video_urls": video_urls,
         "playlist_urls": playlist_urls,
+        "channel_urls": channel_urls,
         "languages": languages,
         "comments": comments,
         "whisper": whisper,
         "max_videos": max_videos,
-        "playlist_start_index": start_index,
+        "playlist_start_index": playlist_start_index,
+        "channel_start_index": channel_start_index,
+        "catalog_max_videos": catalog_max_videos,
+        "research_channel_videos": research_channel_videos,
         "concurrency": 1 if whisper else concurrency,
     }
 
@@ -147,8 +174,7 @@ def fetch_playlist_video_ids(
             timeout=25,
         )
         api_pages += 1
-        items = payload.get("items") or []
-        for item in items:
+        for item in payload.get("items") or []:
             video_id = str(
                 (item.get("contentDetails") or {}).get("videoId") or ""
             ).strip()
@@ -178,14 +204,154 @@ def fetch_playlist_video_ids(
         "api_pages": api_pages,
         "catalog_exhausted": exhausted,
         "truncated_by_limit": not exhausted and len(selected) >= limit,
+        "next_start_index": None if exhausted else start_index + len(selected),
         "next_page_token_present": bool(page_token),
     }
 
 
-def resolve_batch_video_ids(
+def run_batch(
+    raw_request: dict[str, Any],
+    output_root: Path,
+    *,
+    youtube_api_key: str | None = None,
+    fast_cloud: bool = False,
+) -> tuple[dict[str, Any], Path]:
+    request = normalize_batch_request(raw_request)
+    if fast_cloud and request["whisper"]:
+        raise InvalidBatchRequest(
+            "Whisper cannot run through --fast-cloud; use the standard batch path"
+        )
+
+    started_at = datetime.now(timezone.utc)
+    video_ids, playlists, channels, duplicate_count = _resolve_sources(
+        request,
+        youtube_api_key,
+        output_root,
+    )
+    results = _fetch_video_set(
+        video_ids,
+        request,
+        output_root,
+        youtube_api_key,
+        fast_cloud,
+    )
+
+    proven_count = sum(result["status"] == "PROVEN" for result in results)
+    partial_count = sum(result["status"] == "PARTIAL" for result in results)
+    failed_count = sum(result["status"] == "FAILED" for result in results)
+    playlist_truncated = any(item["truncated_by_limit"] for item in playlists)
+    channel_partial = any(item["status"] != "PROVEN" for item in channels)
+
+    sources_complete = not playlist_truncated and not channel_partial
+    videos_complete = proven_count == len(video_ids)
+    if videos_complete and sources_complete:
+        batch_status = "PROVEN"
+    elif proven_count or partial_count or channels:
+        batch_status = "PARTIAL"
+    else:
+        batch_status = "FAILED"
+
+    completed_at = datetime.now(timezone.utc)
+    batch_directory = output_root / "batches" / request["request_id"]
+    batch_directory.mkdir(parents=True, exist_ok=True)
+    expected_indices = list(range(1, len(video_ids) + 1))
+    actual_indices = [int(result["index"]) for result in results]
+    duplicate_indices = sorted(
+        index for index in set(actual_indices) if actual_indices.count(index) > 1
+    )
+    missing_indices = sorted(set(expected_indices) - set(actual_indices))
+    unexpected_indices = sorted(set(actual_indices) - set(expected_indices))
+
+    request_for_receipt = dict(request)
+    request_json = json.dumps(
+        request_for_receipt,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    receipt = {
+        "schema_version": "1.1",
+        "batch_id": request["request_id"],
+        "status": batch_status,
+        "started_at": started_at.isoformat(),
+        "completed_at": completed_at.isoformat(),
+        "duration_seconds": round((completed_at - started_at).total_seconds(), 3),
+        "request": request_for_receipt,
+        "request_sha256": hashlib.sha256(request_json.encode("utf-8")).hexdigest(),
+        "resolved_video_count": len(video_ids),
+        "resolved_video_ids": video_ids,
+        "duplicate_video_count_removed": duplicate_count,
+        "playlist_expansions": playlists,
+        "playlist_catalog_status": "PARTIAL" if playlist_truncated else "PROVEN",
+        "channel_catalogs": channels,
+        "channel_catalog_status": "PARTIAL" if channel_partial else "PROVEN",
+        "proven_count": proven_count,
+        "partial_count": partial_count,
+        "failed_count": failed_count,
+        "coverage": {
+            "status": (
+                "PROVEN"
+                if not missing_indices and not duplicate_indices and not unexpected_indices
+                else "REJECTED"
+            ),
+            "exactly_once": (
+                not missing_indices and not duplicate_indices and not unexpected_indices
+            ),
+            "missing_indices": missing_indices,
+            "duplicate_indices": duplicate_indices,
+            "unexpected_indices": unexpected_indices,
+            "ordered_contiguous": actual_indices == expected_indices,
+        },
+        "results": results,
+    }
+    reader_manifest = {
+        "schema_version": "1.1",
+        "batch_id": request["request_id"],
+        "status": batch_status,
+        "batch_receipt": "batch-receipt.json",
+        "private_batch_path": f"batches/{request['request_id']}/latest/",
+        "private_read_order": [
+            f"batches/{request['request_id']}/latest/batch-receipt.json",
+            *[
+                f"channels/{item['channel_id']}/latest/channel-receipt.json"
+                for item in channels
+            ],
+            *[
+                f"videos/{result['video_id']}/latest/reader-manifest.json"
+                for result in results
+                if result["status"] != "FAILED"
+            ],
+        ],
+        "local_read_order": [
+            "batch-receipt.json",
+            *[
+                f"../../channels/{item['channel_id']}/channel-receipt.json"
+                for item in channels
+            ],
+            *[
+                f"../../{result['video_id']}/reader-manifest.json"
+                for result in results
+                if result["status"] != "FAILED"
+            ],
+        ],
+    }
+
+    (batch_directory / "batch-receipt.json").write_text(
+        json.dumps(receipt, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (batch_directory / "batch-reader-manifest.json").write_text(
+        json.dumps(reader_manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return receipt, batch_directory
+
+
+def _resolve_sources(
     request: dict[str, Any],
     youtube_api_key: str | None,
-) -> tuple[list[str], list[dict[str, Any]], int]:
+    output_root: Path,
+) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]], int]:
     direct_ids = [extract_video_id(value) for value in request["video_urls"]]
     if len(direct_ids) > request["max_videos"]:
         raise InvalidBatchRequest(
@@ -207,6 +373,7 @@ def resolve_batch_video_ids(
                     "api_pages": 0,
                     "catalog_exhausted": False,
                     "truncated_by_limit": True,
+                    "next_start_index": request["playlist_start_index"],
                     "next_page_token_present": False,
                     "not_expanded_reason": "max_videos reached before this playlist",
                 }
@@ -221,33 +388,56 @@ def resolve_batch_video_ids(
         combined.extend(playlist_ids)
         playlists.append(metadata)
 
+    channels: list[dict[str, Any]] = []
+    for channel_url in request["channel_urls"]:
+        catalog = fetch_channel_catalog(
+            channel_url,
+            youtube_api_key,
+            start_index=request["channel_start_index"],
+            limit=request["catalog_max_videos"],
+        )
+        destination = write_channel_catalog(catalog, output_root)
+        channel_id = catalog["channel"]["channel_id"]
+        summary = {
+            "channel_id": channel_id,
+            "channel_title": catalog["channel"].get("title"),
+            "requested_reference": channel_url,
+            "status": catalog["status"],
+            "video_count": len(catalog["videos"]),
+            "unavailable_video_count": catalog["unavailable_video_count"],
+            "catalog_exhausted": catalog["selection"]["catalog_exhausted"],
+            "truncated_by_limit": catalog["selection"]["truncated_by_limit"],
+            "next_start_index": catalog["selection"]["next_start_index"],
+            "private_result_path": f"channels/{channel_id}/latest/",
+            "local_result_path": str(destination),
+        }
+        channels.append(summary)
+
+        if request["research_channel_videos"]:
+            remaining = request["max_videos"] - len(_dedupe(combined))
+            if remaining > 0:
+                combined.extend(
+                    video["video_id"] for video in catalog["videos"][:remaining]
+                )
+
     deduped = _dedupe(combined)
     duplicate_count = len(combined) - len(deduped)
-    if not deduped:
-        raise InvalidBatchRequest("The request resolved to zero videos")
-    return deduped[: request["max_videos"]], playlists, duplicate_count
+    if not deduped and not channels:
+        raise InvalidBatchRequest("The request resolved to zero videos or channel catalogs")
+    return deduped[: request["max_videos"]], playlists, channels, duplicate_count
 
 
-def run_batch(
-    raw_request: dict[str, Any],
+def _fetch_video_set(
+    video_ids: list[str],
+    request: dict[str, Any],
     output_root: Path,
-    *,
-    youtube_api_key: str | None = None,
-    fast_cloud: bool = False,
-) -> tuple[dict[str, Any], Path]:
-    request = normalize_batch_request(raw_request)
-    if fast_cloud and request["whisper"]:
-        raise InvalidBatchRequest(
-            "Whisper cannot run through --fast-cloud; use the standard batch path"
-        )
+    youtube_api_key: str | None,
+    fast_cloud: bool,
+) -> list[dict[str, Any]]:
+    if not video_ids:
+        return []
 
-    started_at = datetime.now(timezone.utc)
-    video_ids, playlists, duplicate_count = resolve_batch_video_ids(
-        request,
-        youtube_api_key,
-    )
     results: list[dict[str, Any] | None] = [None] * len(video_ids)
-
     with ThreadPoolExecutor(
         max_workers=request["concurrency"],
         thread_name_prefix="aitube-batch",
@@ -279,110 +469,7 @@ def run_batch(
                     "error": str(exc),
                     "private_result_path": f"videos/{video_id}/latest/",
                 }
-
-    finalized_results = [result for result in results if result is not None]
-    proven_count = sum(result["status"] == "PROVEN" for result in finalized_results)
-    partial_count = sum(result["status"] == "PARTIAL" for result in finalized_results)
-    failed_count = sum(result["status"] == "FAILED" for result in finalized_results)
-    playlist_truncated = any(item["truncated_by_limit"] for item in playlists)
-
-    if proven_count == len(video_ids) and not playlist_truncated:
-        batch_status = "PROVEN"
-    elif proven_count or partial_count:
-        batch_status = "PARTIAL"
-    else:
-        batch_status = "FAILED"
-
-    completed_at = datetime.now(timezone.utc)
-    batch_directory = output_root / "batches" / request["request_id"]
-    batch_directory.mkdir(parents=True, exist_ok=True)
-    expected_indices = list(range(1, len(video_ids) + 1))
-    actual_indices = [int(result["index"]) for result in finalized_results]
-    duplicate_indices = sorted(
-        index for index in set(actual_indices) if actual_indices.count(index) > 1
-    )
-    missing_indices = sorted(set(expected_indices) - set(actual_indices))
-    unexpected_indices = sorted(set(actual_indices) - set(expected_indices))
-
-    request_for_receipt = {
-        key: value
-        for key, value in request.items()
-        if key not in {"video_urls", "playlist_urls"}
-    }
-    request_for_receipt["video_urls"] = request["video_urls"]
-    request_for_receipt["playlist_urls"] = request["playlist_urls"]
-    request_json = json.dumps(
-        request_for_receipt,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-    receipt = {
-        "schema_version": "1.0",
-        "batch_id": request["request_id"],
-        "status": batch_status,
-        "started_at": started_at.isoformat(),
-        "completed_at": completed_at.isoformat(),
-        "duration_seconds": round((completed_at - started_at).total_seconds(), 3),
-        "request": request_for_receipt,
-        "request_sha256": hashlib.sha256(request_json.encode("utf-8")).hexdigest(),
-        "resolved_video_count": len(video_ids),
-        "resolved_video_ids": video_ids,
-        "duplicate_video_count_removed": duplicate_count,
-        "playlist_expansions": playlists,
-        "playlist_catalog_status": "PARTIAL" if playlist_truncated else "PROVEN",
-        "proven_count": proven_count,
-        "partial_count": partial_count,
-        "failed_count": failed_count,
-        "coverage": {
-            "status": (
-                "PROVEN"
-                if not missing_indices and not duplicate_indices and not unexpected_indices
-                else "REJECTED"
-            ),
-            "exactly_once": (
-                not missing_indices and not duplicate_indices and not unexpected_indices
-            ),
-            "missing_indices": missing_indices,
-            "duplicate_indices": duplicate_indices,
-            "unexpected_indices": unexpected_indices,
-            "ordered_contiguous": actual_indices == expected_indices,
-        },
-        "results": finalized_results,
-    }
-    reader_manifest = {
-        "schema_version": "1.0",
-        "batch_id": request["request_id"],
-        "status": batch_status,
-        "batch_receipt": "batch-receipt.json",
-        "private_batch_path": f"batches/{request['request_id']}/latest/",
-        "private_read_order": [
-            f"batches/{request['request_id']}/latest/batch-receipt.json",
-            *[
-                f"videos/{result['video_id']}/latest/reader-manifest.json"
-                for result in finalized_results
-                if result["status"] != "FAILED"
-            ],
-        ],
-        "local_read_order": [
-            "batch-receipt.json",
-            *[
-                f"../../{result['video_id']}/reader-manifest.json"
-                for result in finalized_results
-                if result["status"] != "FAILED"
-            ],
-        ],
-    }
-
-    (batch_directory / "batch-receipt.json").write_text(
-        json.dumps(receipt, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (batch_directory / "batch-reader-manifest.json").write_text(
-        json.dumps(reader_manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return receipt, batch_directory
+    return [result for result in results if result is not None]
 
 
 def _fetch_one(
@@ -526,8 +613,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="aitube-batch",
         description=(
-            "Fetch transcript, description, metadata, and comments for multiple "
-            "YouTube videos or playlists."
+            "Fetch private research for multiple YouTube videos or playlists and "
+            "optionally catalog channel uploads."
         ),
     )
     parser.add_argument("request", type=Path, help="Batch request JSON path")
@@ -566,6 +653,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"BATCH_ID={receipt['batch_id']}")
         print(f"BATCH_STATUS={receipt['status']}")
         print(f"VIDEO_COUNT={receipt['resolved_video_count']}")
+        print(f"CHANNEL_COUNT={len(receipt['channel_catalogs'])}")
         print(f"PROVEN_COUNT={receipt['proven_count']}")
         print(f"PARTIAL_COUNT={receipt['partial_count']}")
         print(f"FAILED_COUNT={receipt['failed_count']}")
