@@ -70,33 +70,90 @@ def _fetch_metadata(
     attempts: list[dict[str, Any]],
     warnings: list[str],
 ) -> dict[str, Any]:
+    profiles: tuple[tuple[str, dict[str, list[str]]], ...] = (
+        ("yt-dlp default clients", {}),
+        (
+            "yt-dlp non-web clients",
+            {"player_client": ["default", "-web"], "skip": ["translated_subs"]},
+        ),
+        (
+            "yt-dlp tv/ios clients",
+            {
+                "player_client": ["tv", "ios"],
+                "player_skip": ["webpage"],
+                "skip": ["translated_subs"],
+            },
+        ),
+    )
+    info: dict[str, Any] = {}
+    for profile_name, extractor_overrides in profiles:
+        params = _base_yt_dlp_params(options)
+        params["extractor_args"] = {"youtube": extractor_overrides}
+        try:
+            with YoutubeDL(params) as downloader:
+                extracted = downloader.extract_info(url, download=False)
+            if extracted:
+                info = extracted
+                attempts.append({"source": profile_name, "ok": True})
+                break
+            attempts.append({"source": profile_name, "ok": False, "error": "empty result"})
+        except Exception as exc:
+            attempts.append({"source": profile_name, "ok": False, "error": str(exc)})
+
+    if not info:
+        warnings.append("Core YouTube metadata extraction failed for every yt-dlp client profile.")
+        info = {"id": extract_video_id(url), "webpage_url": url}
+
+    if options.include_comments:
+        comments = _fetch_comments(url, options, attempts)
+        if comments:
+            info["comments"] = comments
+    return info
+
+
+def _fetch_comments(
+    url: str, options: FetchOptions, attempts: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    params = _base_yt_dlp_params(options)
+    params.update(
+        {
+            "getcomments": True,
+            "extractor_args": {
+                "youtube": {
+                    "comment_sort": ["top"],
+                    "max_comments": [
+                        f"{max(0, options.comment_limit)},all,all,all,1"
+                    ],
+                }
+            },
+        }
+    )
+    try:
+        with YoutubeDL(params) as downloader:
+            extracted = downloader.extract_info(url, download=False) or {}
+        comments = extracted.get("comments") or []
+        attempts.append(
+            {"source": "yt-dlp comments", "ok": bool(comments), "count": len(comments)}
+        )
+        return comments
+    except Exception as exc:
+        attempts.append({"source": "yt-dlp comments", "ok": False, "error": str(exc)})
+        return []
+
+
+def _base_yt_dlp_params(options: FetchOptions) -> dict[str, Any]:
     params: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
-        "getcomments": options.include_comments,
-        "extractor_args": {
-            "youtube": {
-                "comment_sort": ["top"],
-                "max_comments": [f"{max(0, options.comment_limit)},all,all,all,1"],
-            }
-        },
+        "getcomments": False,
     }
     if options.cookies:
         params["cookiefile"] = str(options.cookies)
     if options.proxy:
         params["proxy"] = options.proxy
-
-    try:
-        with YoutubeDL(params) as downloader:
-            info = downloader.extract_info(url, download=False)
-        attempts.append({"source": "yt-dlp metadata/comments", "ok": True})
-        return info or {}
-    except Exception as exc:  # yt-dlp raises a large family of extractor errors
-        attempts.append({"source": "yt-dlp metadata/comments", "ok": False, "error": str(exc)})
-        warnings.append(f"Metadata extraction failed: {exc}")
-        return {"id": extract_video_id(url), "webpage_url": url}
+    return params
 
 
 def _fetch_transcript_api(
