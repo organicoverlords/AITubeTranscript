@@ -23,117 +23,206 @@ on:
         default: false
         type: boolean
       tool_ref:
-        description: AITubeTranscript branch, tag, or commit to install
+        description: AITubeTranscript branch, tag, or commit
         required: false
         default: main
         type: string
     secrets:
       YOUTUBE_API_KEY:
-        description: YouTube Data API key for reliable descriptions and comments
+        description: YouTube Data API key for descriptions and comments
         required: true
 
 permissions:
   contents: write
 
-jobs:
-  privacy-gate:
-    name: Require private caller
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Reject public repositories
-        env:
-          CALLER_REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
-        run: |
-          set -euo pipefail
-          if [[ "$CALLER_REPOSITORY_PRIVATE" != "true" ]]; then
-            echo "::error::AITubeTranscript refuses to run in a public repository."
-            echo "Use a private companion repository for requests, logs, and results."
-            exit 1
-          fi
+concurrency:
+  group: private-aitube-results-${{ github.repository }}
+  cancel-in-progress: false
 
+jobs:
   fetch:
-    name: Fetch and store privately
-    needs: privacy-gate
+    name: Fetch, verify, and store privately
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      ALLOW_PUBLIC_REQUESTS: "false"
+      PYTHONPATH: ${{ github.workspace }}/tool/src
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
     steps:
-      - name: Check out private caller repository
-        uses: actions/checkout@v4
-        with:
-          path: vault
-          fetch-depth: 0
+      - name: Require private caller repository
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$REPOSITORY_PRIVATE" = "true" || {
+            echo "::error::AITubeTranscript refuses to run in a public repository."
+            echo "Use a private companion repository for requests, logs, and results."
+            exit 1
+          }
 
-      - name: Check out public AITubeTranscript tool
+      - name: Check out public tool only
         uses: actions/checkout@v4
         with:
           repository: organicoverlords/AITubeTranscript
           ref: ${{ inputs.tool_ref }}
           path: tool
+          fetch-depth: 1
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: tool/pyproject.toml
+      - name: Prove dependency-free cloud runtime
+        run: |
+          python3 -S -c \
+            "import aitubetranscript.cli, aitubetranscript.cloud_fast; print('CLOUD_FAST_IMPORT=PROVEN')"
 
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Install tool
-        run: python -m pip install ./tool
-
-      - name: Fetch private research bundle
+      - id: request
+        name: Resolve and validate request
         env:
           VIDEO_URL: ${{ inputs.video_url }}
           LANGUAGES: ${{ inputs.languages }}
           COMMENTS: ${{ inputs.comments }}
           WHISPER: ${{ inputs.whisper }}
         run: |
-          set -euo pipefail
+          python3 -S - <<'PY'
+          import os
+          from pathlib import Path
+
+          from aitubetranscript.youtube import extract_video_id
+
+          video_url = os.environ["VIDEO_URL"].strip()
+          languages = os.environ["LANGUAGES"].strip() or "en"
+          comments = int(os.environ["COMMENTS"])
+          whisper = os.environ["WHISPER"].lower() == "true"
+          video_id = extract_video_id(video_url)
+
+          if not 0 <= comments <= 1000:
+              raise ValueError("comments must be between 0 and 1000")
+          if any(character in languages for character in "\r\n"):
+              raise ValueError("languages must be a single line")
+
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as handle:
+              handle.write(f"video_url={video_url}\n")
+              handle.write(f"video_id={video_id}\n")
+              handle.write(f"languages={languages}\n")
+              handle.write(f"comments={comments}\n")
+              handle.write(f"whisper={str(whisper).lower()}\n")
+          PY
+
+      - name: Require metadata key
+        run: |
           test -n "${YOUTUBE_API_KEY:-}" || {
             echo "::error::YOUTUBE_API_KEY is required in the private caller repository."
             exit 1
           }
-          args=("$VIDEO_URL" --languages "$LANGUAGES" --comments "$COMMENTS" --output "$RUNNER_TEMP/results")
-          if [[ "$WHISPER" == "true" ]]; then
-            python -m pip install "./tool[whisper]"
-            args+=(--whisper)
-          fi
-          aitube-transcript "${args[@]}" | tee "$RUNNER_TEMP/aitube-run.txt"
+          echo "YOUTUBE_DATA_API=AVAILABLE"
 
-      - name: Publish only to private results branch
+      - name: Fetch private research bundle
+        env:
+          VIDEO_URL: ${{ steps.request.outputs.video_url }}
+          LANGUAGES: ${{ steps.request.outputs.languages }}
+          COMMENTS: ${{ steps.request.outputs.comments }}
+          WHISPER: ${{ steps.request.outputs.whisper }}
         run: |
           set -euo pipefail
-          video_id="$(grep '^VIDEO_ID=' "$RUNNER_TEMP/aitube-run.txt" | cut -d= -f2-)"
-          result_dir="$RUNNER_TEMP/results/$video_id"
-          test -n "$video_id"
-          test -f "$result_dir/receipt.json"
-
-          cd vault
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git fetch origin aitube-results:refs/remotes/origin/aitube-results || true
-
-          if git show-ref --verify --quiet refs/remotes/origin/aitube-results; then
-            git switch --detach refs/remotes/origin/aitube-results
-            git switch -C aitube-results
+          args=(
+            "$VIDEO_URL"
+            --languages "$LANGUAGES"
+            --comments "$COMMENTS"
+            --output "$RUNNER_TEMP/results"
+          )
+          if [[ "$WHISPER" == "true" ]]; then
+            python3 -m venv "$RUNNER_TEMP/aitube-venv"
+            "$RUNNER_TEMP/aitube-venv/bin/python" -m pip install \
+              --disable-pip-version-check \
+              --no-input \
+              "./tool[whisper]"
+            "$RUNNER_TEMP/aitube-venv/bin/python" -m aitubetranscript.cli \
+              "${args[@]}" --whisper | tee "$RUNNER_TEMP/aitube-run.txt"
           else
-            git switch --orphan aitube-results
-            git rm -rf . || true
-            printf '# Private AITube results\n\nGenerated bundles are private.\n' > README.md
+            python3 -S -m aitubetranscript.cli \
+              "${args[@]}" --fast-cloud | tee "$RUNNER_TEMP/aitube-run.txt"
           fi
 
-          latest="videos/$video_id/latest"
-          snapshot="videos/$video_id/runs/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          rm -rf "$latest"
-          mkdir -p "$latest" "$snapshot"
-          cp -R "$result_dir/." "$latest/"
-          cp -R "$result_dir/." "$snapshot/"
+      - name: Verify complete reader representation
+        env:
+          VIDEO_ID: ${{ steps.request.outputs.video_id }}
+          COMMENTS_REQUESTED: ${{ steps.request.outputs.comments }}
+        run: |
+          python3 -S - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-          git add README.md "videos/$video_id"
-          git commit -m "Private fetch $video_id" || true
+          root = Path(os.environ["RUNNER_TEMP"]) / "results" / os.environ["VIDEO_ID"]
+          receipt = json.loads((root / "receipt.json").read_text(encoding="utf-8"))
+          transcript = json.loads(
+              (root / "transcript-manifest.json").read_text(encoding="utf-8")
+          )
+          comments = json.loads(
+              (root / "comments-manifest.json").read_text(encoding="utf-8")
+          )
+          reader = json.loads(
+              (root / "reader-manifest.json").read_text(encoding="utf-8")
+          )
+
+          assert receipt["transcript_status"] == "PROVEN", receipt
+          assert receipt["transcript_coverage_status"] == "PROVEN", receipt
+          assert transcript["coverage"]["status"] == "PROVEN", transcript
+          assert transcript["coverage"]["exactly_once"] is True, transcript
+          assert transcript["coverage"]["missing_indices"] == [], transcript
+          assert transcript["coverage"]["duplicate_indices"] == [], transcript
+          assert transcript["coverage"]["unexpected_indices"] == [], transcript
+          assert transcript["coverage"]["ordered_contiguous"] is True, transcript
+          assert transcript["transcript_jsonl"]["line_count"] == receipt["segment_count"]
+
+          if int(os.environ["COMMENTS_REQUESTED"]) > 0:
+              assert receipt["comments_status"] == "PROVEN", receipt
+              assert receipt["comments_coverage_status"] == "PROVEN", receipt
+              assert comments["coverage"]["status"] == "PROVEN", comments
+              assert comments["coverage"]["exactly_once"] is True, comments
+              assert comments["coverage"]["missing_indices"] == [], comments
+              assert comments["coverage"]["duplicate_indices"] == [], comments
+              assert comments["coverage"]["unexpected_indices"] == [], comments
+              assert comments["coverage"]["ordered_contiguous"] is True, comments
+              assert comments["comments_jsonl"]["line_count"] == receipt["comment_count"]
+
+          assert reader["read_order"][0] == "description.md", reader
+          assert reader["transcript"]["status"] == "PROVEN", reader
+          print("PRIVATE_READER_COVERAGE=PROVEN")
+          PY
+
+      - name: Publish latest only to private results branch
+        env:
+          VIDEO_ID: ${{ steps.request.outputs.video_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          result_dir="$RUNNER_TEMP/results/$VIDEO_ID"
+          test -f "$result_dir/receipt.json"
+
+          mkdir "$RUNNER_TEMP/vault"
+          cd "$RUNNER_TEMP/vault"
+          git init -q
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          if git fetch --depth=1 --filter=blob:none origin aitube-results; then
+            git sparse-checkout init --no-cone
+            printf '/README.md\n/videos/%s/latest/\n' "$VIDEO_ID" \
+              > .git/info/sparse-checkout
+            git checkout -q -B aitube-results FETCH_HEAD
+          else
+            git checkout -q --orphan aitube-results
+            printf '# Private AITube results\n\nGenerated bundles are private.\n' \
+              > README.md
+          fi
+
+          latest="videos/$VIDEO_ID/latest"
+          rm -rf "$latest"
+          mkdir -p "$latest"
+          cp -R "$result_dir/." "$latest/"
+
+          git add README.md "$latest"
+          git commit -m "Private fetch $VIDEO_ID" || true
           git push origin HEAD:aitube-results
