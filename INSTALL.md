@@ -1,6 +1,6 @@
 # Install the private GitHub setup
 
-This is the same basic architecture as the working `organicoverlords` deployment:
+This uses the same architecture as the working `organicoverlords` deployment:
 
 ```text
 public tool:     organicoverlords/AITubeTranscript
@@ -12,9 +12,11 @@ results branch:  aitube-results
 
 You do **not** need to fork or modify the public tool repository.
 
+The installed workflow supports one video, many videos, playlists, and channel catalogs.
+
 ## 1. Create a private repository
 
-Create one private GitHub repository for requests, workflow logs, transcripts, descriptions, comments, and receipts.
+Create one private GitHub repository for requests, workflow logs, transcripts, descriptions, comments, channel catalogs, and receipts.
 
 Example:
 
@@ -22,7 +24,7 @@ Example:
 YOUR_ACCOUNT/aitube-private
 ```
 
-For the existing deployment, this repository is:
+The existing deployment uses:
 
 ```text
 organicoverlords/all
@@ -37,7 +39,7 @@ In Google Cloud:
 3. Create an API key.
 4. Restrict the key to **YouTube Data API v3**.
 
-The key is used for reliable descriptions, metadata, and comments. Do not put it in the public repository or request file.
+The key is used for playlist expansion, channel upload catalogs, descriptions, durations, publication metadata, statistics, and comments. Do not put it in the public repository or request file.
 
 ## 3. Add the key to the private repository
 
@@ -50,7 +52,7 @@ Settings
 → New repository secret
 ```
 
-Create this secret:
+Create:
 
 ```text
 Name:  YOUTUBE_API_KEY
@@ -87,6 +89,14 @@ aitube-requests/current.json
 
 Commit both files to `main`.
 
+The workflow template must call:
+
+```text
+organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@main
+```
+
+Do not use an older single-video-only template.
+
 ## 5. Create the request branch
 
 Create this branch from the private repository's current `main` branch:
@@ -95,7 +105,7 @@ Create this branch from the private repository's current `main` branch:
 request/aitube-live
 ```
 
-The workflow and request file must already exist before creating the branch.
+The workflow and request file must exist before creating the branch.
 
 ## 6. Give GPT access to the private repository
 
@@ -105,17 +115,11 @@ The GitHub connection used by GPT must be able to:
 - update `aitube-requests/current.json`
 - read the private `aitube-results` branch
 
-Do not give GPT the API key itself. GPT only needs repository access; GitHub Actions reads the secret.
+Do not give GPT the API key itself. GitHub Actions reads the secret.
 
 ## 7. Run the first video
 
-Open this file on branch `request/aitube-live`:
-
-```text
-aitube-requests/current.json
-```
-
-Replace it with a real request:
+On `request/aitube-live`, replace `aitube-requests/current.json` with:
 
 ```json
 {
@@ -127,31 +131,29 @@ Replace it with a real request:
 }
 ```
 
-Commit the change directly to `request/aitube-live`.
-
-That commit starts the private workflow automatically.
+Commit directly to `request/aitube-live`. That starts the private workflow.
 
 ## 8. Check the result
 
-The workflow creates or updates this private branch:
+The workflow creates or updates:
 
 ```text
 aitube-results
 ```
 
-The result is stored at:
+First open:
 
 ```text
-videos/<video-id>/latest/
+batches/first-test-001/latest/batch-receipt.json
 ```
 
-For the example above:
+Require exactly-once batch accounting and locate the selected video result. Then open:
 
 ```text
-videos/JsrwIGbuM8o/latest/
+videos/JsrwIGbuM8o/latest/receipt.json
 ```
 
-Open `receipt.json` and require:
+Require:
 
 ```text
 transcript_status = PROVEN
@@ -160,16 +162,36 @@ comments_status = PROVEN
 comments_coverage_status = PROVEN
 ```
 
-Then use `reader-manifest.json` to read the description, transcript chunks, and comment chunks.
+Use `batch-reader-manifest.json` and the video's `reader-manifest.json` to find every required file.
 
 ## Normal future use
 
-After installation, each new video requires only one change:
+For each new request:
 
 1. Read the current blob SHA of `aitube-requests/current.json` on `request/aitube-live`.
-2. Replace the file with a unique `request_id` and the new YouTube URL.
-3. Poll the matching private receipt on `aitube-results`.
-4. Verify coverage and read every file listed by `reader-manifest.json`.
+2. Replace it with a unique `request_id` and one of the formats in [`BATCH_USAGE.md`](BATCH_USAGE.md).
+3. Poll the matching private batch receipt.
+4. Verify batch, channel, transcript, and comment coverage as applicable.
+5. Read every file required by the relevant reader manifests.
+
+Supported fields include:
+
+```text
+video_url / video_urls
+playlist_url / playlist_urls
+channel_url / channel_urls
+```
+
+A channel catalog request creates:
+
+```text
+channels/<channel-id>/latest/channel-videos.md
+channels/<channel-id>/latest/channel-videos.jsonl
+channels/<channel-id>/latest/channel-catalog.json
+channels/<channel-id>/latest/channel-receipt.json
+```
+
+Each selected public upload includes its title, publication timestamp/date, duration, video ID/URL, and available snapshot statistics.
 
 The recommended GPT memory block is in [`GPT_MEMORY.md`](GPT_MEMORY.md).
 
@@ -177,13 +199,13 @@ The recommended GPT memory block is in [`GPT_MEMORY.md`](GPT_MEMORY.md).
 
 ### Workflow does not start
 
-Confirm that the request was committed to:
+Confirm the request was committed to:
 
 ```text
 request/aitube-live
 ```
 
-and that the changed path is exactly:
+and the changed path is exactly:
 
 ```text
 aitube-requests/current.json
@@ -191,15 +213,13 @@ aitube-requests/current.json
 
 ### Publishing to `aitube-results` fails
 
-The private workflow needs permission to write repository contents. Enable read/write workflow permissions for the private repository's GitHub Actions.
+Enable read/write workflow permissions for the private repository's GitHub Actions.
 
-### Description or comments are not proven
+### Playlists, channels, descriptions, or comments fail
 
-Confirm that the private repository contains a valid `YOUTUBE_API_KEY` secret and that the key is allowed to use YouTube Data API v3.
+Confirm the private repository contains a valid `YOUTUBE_API_KEY` secret restricted to YouTube Data API v3.
 
 ## Existing `organicoverlords` setup
-
-The current working deployment is already installed:
 
 ```text
 public tool:     organicoverlords/AITubeTranscript

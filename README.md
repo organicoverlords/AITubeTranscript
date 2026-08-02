@@ -1,13 +1,16 @@
 # AITubeTranscript
 
-**Private-first YouTube research for humans and GPT agents.** Fetch a video's available transcript, full description, metadata, and a bounded set of top-level comments; store the result privately; and prove that every retrieved segment and comment is represented exactly once.
+**Private-first YouTube research for humans and GPT agents.** Fetch one video, many videos, playlists, or channel catalogs; keep generated research private; and prove exactly what was retrieved and read.
 
-The source code is public. The supported GitHub workflow refuses public callers so requests, logs, transcripts, descriptions, comments, and receipts stay in a private companion repository.
+AITubeTranscript collects transcripts, descriptions, metadata, and bounded top-level comments. It does **not** download or republish video or audio files.
+
+The source code is public. Official GitHub workflows reject public callers so requests, logs, transcripts, descriptions, comments, catalogs, and receipts remain in a private companion repository.
 
 ## Start here
 
 - **Easiest setup through ChatGPT + MagicMusic:** [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md)
-- **Manual setup like the working `organicoverlords` deployment:** [`INSTALL.md`](INSTALL.md)
+- **Multiple videos, playlists, and channels:** [`BATCH_USAGE.md`](BATCH_USAGE.md)
+- **Manual private setup:** [`INSTALL.md`](INSTALL.md)
 - **Canonical GPT execution contract:** [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md)
 - **Copy-paste ChatGPT memory instruction:** [`GPT_MEMORY.md`](GPT_MEMORY.md)
 
@@ -29,12 +32,46 @@ results branch:  aitube-results
 
 You do not need to fork or modify this public repository.
 
-## What it produces
+## Supported private requests
 
-Each private result is written to:
+The same request file supports:
+
+- one `video_url`
+- several `video_urls`
+- one or several `playlist_url(s)`
+- one or several `channel_url(s)`
+- any mixture of those sources
+
+Example channel catalog request:
+
+```json
+{
+  "request_id": "channel-catalog-20260803-001",
+  "channel_url": "https://www.youtube.com/@CHANNEL_HANDLE",
+  "channel_start_index": 0,
+  "catalog_max_videos": 5000,
+  "research_channel_videos": false
+}
+```
+
+A channel catalog lists every selected public API-visible upload with:
+
+- title and video URL
+- exact publication timestamp and date
+- ISO duration, seconds, and readable duration
+- snapshot views, likes, and comments
+- privacy/API visibility and live status
+
+Set `research_channel_videos` to `true` to also fetch full transcript, description, metadata, and comment bundles for up to `max_videos` selected uploads.
+
+See [`BATCH_USAGE.md`](BATCH_USAGE.md) for complete examples, continuation offsets, limits, and proof rules.
+
+## Private result paths
+
+### Individual video
 
 ```text
-aitube-results/videos/<video-id>/latest/
+videos/<video-id>/latest/
 ```
 
 ```text
@@ -47,26 +84,40 @@ latest/
 ├── transcript.jsonl
 ├── transcript-manifest.json
 ├── chunks/
-│   ├── 001.md
-│   └── ...
 ├── comments.md
 ├── comments.jsonl
 ├── comments-manifest.json
 ├── comment-chunks/
-│   ├── 001.md
-│   └── ...
 └── result.json
 ```
 
-`reader-manifest.json` is the entry point for an automated reader. It lists the exact bounded files to open, their deterministic order, and groups that may be read in parallel.
+### Channel catalog
+
+```text
+channels/<channel-id>/latest/
+├── channel-receipt.json
+├── channel-videos.md
+├── channel-videos.jsonl
+└── channel-catalog.json
+```
+
+### Batch receipt
+
+```text
+batches/<request-id>/latest/
+├── batch-receipt.json
+└── batch-reader-manifest.json
+```
+
+The batch receipt accounts for every selected video, playlist expansion, channel catalog, duplicate removal, partial result, and failure.
 
 ## Private GitHub installation
 
-Use [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md) when MagicMusic is available. ChatGPT creates the private repository, installs the templates, creates the request branch, configures Actions permissions, and verifies the result. The user only performs the API-key secret step.
+Use [`MAGICMUSIC_INSTALL.md`](MAGICMUSIC_INSTALL.md) when MagicMusic is available. ChatGPT creates the private repository, installs the current batch-capable request workflow, creates the request branch, configures Actions permissions, and verifies the result. The user performs only the API-key secret step.
 
 Use [`INSTALL.md`](INSTALL.md) for the equivalent manual setup.
 
-The existing deployment already uses:
+The existing deployment uses:
 
 ```text
 public tool:     organicoverlords/AITubeTranscript
@@ -77,13 +128,13 @@ results branch:  aitube-results
 
 ## GPT-optimized operation
 
-GPT should update one private request file, poll one private receipt, verify the manifests, and read every file listed by `reader-manifest.json`.
+GPT updates one private request file, polls one private receipt, verifies the manifests, and opens every file required by the appropriate reader manifest.
 
-The core rule is simple: **workflow success is not proof that every word was read**. GPT may claim complete reading only after it has opened every reader file and the coverage manifests are proven.
+Workflow success is not proof that every word was read. GPT may claim complete reading only after it has opened every required reader file and the relevant coverage manifests are proven.
 
 Use:
 
-- [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md) for the exact request, polling, proof, timing, fallback, and privacy contract.
+- [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md) for exact request, polling, batch, catalog, proof, timing, fallback, and privacy rules.
 - [`GPT_MEMORY.md`](GPT_MEMORY.md) for the stable instruction to save in ChatGPT memory.
 
 ## Proof contract
@@ -106,33 +157,48 @@ unexpected_indices = []
 ordered_contiguous = true
 ```
 
-When comments were requested, apply the equivalent requirements to `comments_status`, `comments_coverage_status`, and `comments-manifest.json`.
+Apply the equivalent requirements to comments when requested. Batch and channel receipts independently prove ordered, exactly-once accounting of selected rows; a catalog or playlist may still be `PARTIAL` when deliberately truncated or when a private/deleted video has no public details.
 
-This proves **retrieval representation**, not perfect transcription accuracy. Automatic captions and third-party transcript providers can contain repeated words, punctuation defects, and incorrect names. Important quotations should be checked against the original video.
+Retrieval representation is different from transcription accuracy. Automatic captions and third-party transcript providers can contain repeated words, punctuation defects, and incorrect names. Important quotations should be checked against the original video.
 
 ## Retrieval strategy
 
-The optimized GitHub path prioritizes low-latency cloud-compatible sources:
+The optimized GitHub path uses:
 
-1. official YouTube Data API for description, metadata, and comments
+1. YouTube Data API for playlists, channel uploads, descriptions, durations, publication dates, statistics, and comments
 2. available caption and public transcript endpoints
-3. repository fallback ladder when the fast path fails
+3. repository fallback sources when the fast path fails
 4. optional Whisper only when captions cannot be retrieved
 
-Every attempt and selected source is recorded in `receipt.json`. Missing data remains `NOT_PROVEN`; it is never silently described as complete.
+Every attempt and selected source is recorded. Missing data remains `NOT_PROVEN`; it is never silently described as complete.
 
 ## Optional local CLI
 
-The private GitHub setup does not require a local installation. For local use, Python 3.10 or newer:
+The private GitHub setup requires no local Python installation. For local use with Python 3.10 or newer:
 
 ```bash
 pipx install git+https://github.com/organicoverlords/AITubeTranscript.git
-aitube-transcript "https://www.youtube.com/watch?v=x8W_S9zmodk" \
-  --languages en \
-  --comments 100
 ```
 
-Set the API key locally for reliable descriptions and comments:
+One video:
+
+```bash
+aitube-transcript VIDEO_URL --languages en --comments 100
+```
+
+Batch request file:
+
+```bash
+aitube-batch request.json --fast-cloud
+```
+
+Channel catalog:
+
+```bash
+aitube-channel "https://www.youtube.com/@CHANNEL_HANDLE" --max-videos 5000
+```
+
+Set the API key locally for playlists, channel catalogs, reliable descriptions, and comments:
 
 ```bash
 export YOUTUBE_API_KEY="your-key"
@@ -151,26 +217,16 @@ pipx install "git+https://github.com/organicoverlords/AITubeTranscript.git#egg=a
 aitube-transcript VIDEO_URL --whisper --whisper-model tiny
 ```
 
-## Cookies and restricted videos
-
-Cookies are supported only for deliberate local use:
-
-```bash
-aitube-transcript VIDEO_URL --cookies /path/to/cookies.txt
-```
-
-Never commit cookies. They can grant access to a YouTube account. The official private GitHub setup does not require or distribute them.
-
 ## Privacy boundaries
 
-- Public repository: source, tests, documentation, templates, reusable workflow.
-- Private repository: request file, Actions logs, generated research, API secret.
+- Public repository: source, tests, documentation, templates, reusable workflows.
+- Private repository: request files, Actions logs, generated research, channel catalogs, receipts, API secret.
 - Public workflow execution: rejected.
-- Transcript artifacts: not uploaded through GitHub Actions artifacts.
-- API keys and cookies: never included in generated files.
+- Generated research is not uploaded as public GitHub Actions artifacts.
+- API keys and cookies are never included in generated files.
 
 A user can deliberately modify their own fork to publish data. This project enforces privacy for the official workflow and documented setup; it cannot prevent intentional publication by modified code.
 
 ## Legal and responsible use
 
-Use the tool only for videos you are allowed to access. Respect copyright, privacy, YouTube's terms, and applicable law. The MIT license applies to this software, not to downloaded transcripts, descriptions, or comments.
+Use the tool only for content you are allowed to access. Respect copyright, privacy, YouTube's terms, and applicable law. The MIT license applies to this software, not to retrieved transcripts, descriptions, comments, or channel metadata.

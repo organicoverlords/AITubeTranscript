@@ -1,0 +1,7 @@
+{
+  "request_id": "replace-with-a-unique-channel-catalog-id",
+  "channel_url": "https://www.youtube.com/@CHANNEL_HANDLE",
+  "channel_start_index": 0,
+  "catalog_max_videos": 5000,
+  "research_channel_videos": false
+}
