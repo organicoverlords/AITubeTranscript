@@ -27,6 +27,9 @@ outputs:
 runs:
   using: composite
   steps:
+    - uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
     - shell: bash
       env:
         INPUT_WHISPER: ${{ inputs.whisper }}
