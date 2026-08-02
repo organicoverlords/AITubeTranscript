@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aitube-transcript"
-version = "0.1.0"
-description = "Private-first YouTube transcript, description, comment, and coverage-proof research for humans and GPT agents."
+version = "0.2.0"
+description = "Private-first YouTube transcript, playlist, description, comment, and coverage-proof research for humans and GPT agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "AITubeTranscript contributors"}]
-keywords = ["youtube", "transcript", "captions", "comments", "research"]
+keywords = ["youtube", "transcript", "captions", "comments", "playlist", "research"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
@@ -32,6 +32,7 @@ dev = ["pytest>=8,<9", "ruff>=0.9"]
 
 [project.scripts]
 aitube-transcript = "aitubetranscript.cli:main"
+aitube-batch = "aitubetranscript.batch:main"
 aitube-request = "aitubetranscript.request:main"
 
 [project.urls]
