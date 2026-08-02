@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-comments", action="store_true")
     parser.add_argument("--cookies", type=Path, help="Netscape cookies.txt path")
     parser.add_argument("--proxy", help="HTTP/HTTPS proxy URL")
+    parser.add_argument(
+        "--youtube-api-key",
+        default=os.environ.get("YOUTUBE_API_KEY"),
+        help="Optional YouTube Data API key; defaults to YOUTUBE_API_KEY",
+    )
     parser.add_argument(
         "--whisper", action="store_true", help="Transcribe audio when captions fail"
     )
@@ -46,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         whisper_model=args.whisper_model,
         whisper_device=args.whisper_device,
         whisper_compute_type=args.whisper_compute_type,
+        youtube_api_key=args.youtube_api_key,
     )
     try:
         bundle = fetch_youtube(args.url, options)
