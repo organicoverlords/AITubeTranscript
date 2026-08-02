@@ -2,7 +2,9 @@ name: Private AITube memory bank
 
 on:
   workflow_run:
-    workflows: ["Private AITube fetch"]
+    workflows:
+      - Private AITube fetch
+      - Private AITube request
     types: [completed]
   workflow_dispatch:
 
@@ -51,25 +53,9 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/tool/src
         run: |
           set -euo pipefail
-          args=(--vault "$GITHUB_WORKSPACE/vault")
-
-          while IFS= read -r receipt; do
-            video_id="$(basename "$(dirname "$(dirname "$receipt")")")"
-            args+=(--video-id "$video_id")
-          done < <(find "$GITHUB_WORKSPACE/vault/videos" -path '*/latest/receipt.json' -type f 2>/dev/null | sort)
-
-          while IFS= read -r receipt; do
-            channel_id="$(basename "$(dirname "$(dirname "$receipt")")")"
-            args+=(--channel-id "$channel_id")
-          done < <(find "$GITHUB_WORKSPACE/vault/channels" -path '*/latest/channel-receipt.json' -type f 2>/dev/null | sort)
-
-          python3 -S -m aitubetranscript.memory_bank "${args[@]}"
-
-          while IFS= read -r receipt; do
-            python3 -S -m aitubetranscript.memory_bank \
-              --vault "$GITHUB_WORKSPACE/vault" \
-              --batch-receipt "$receipt"
-          done < <(find "$GITHUB_WORKSPACE/vault/batches" -path '*/latest/batch-receipt.json' -type f 2>/dev/null | sort)
+          python3 -S -m aitubetranscript.memory_bank \
+            --vault "$GITHUB_WORKSPACE/vault" \
+            --rebuild-all
 
       - name: Commit private memory bank
         working-directory: vault
