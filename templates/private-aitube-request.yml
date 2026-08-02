@@ -14,15 +14,12 @@ jobs:
   request:
     runs-on: ubuntu-latest
     outputs:
-      video_url: ${{ steps.read.outputs.video_url }}
-      languages: ${{ steps.read.outputs.languages }}
-      comments: ${{ steps.read.outputs.comments }}
-      whisper: ${{ steps.read.outputs.whisper }}
+      request_json: ${{ steps.read.outputs.request_json }}
     steps:
       - uses: actions/checkout@v4
 
       - id: read
-        name: Read request
+        name: Read and compact request
         shell: bash
         run: |
           python3 - <<'PY'
@@ -33,29 +30,22 @@ jobs:
           request = json.loads(
               Path("aitube-requests/current.json").read_text(encoding="utf-8")
           )
-
-          values = {
-              "video_url": str(request["video_url"]).strip(),
-              "languages": str(request.get("languages", "en")).strip() or "en",
-              "comments": str(int(request.get("comments", 100))),
-              "whisper": str(bool(request.get("whisper", False))).lower(),
-          }
-
+          compact = json.dumps(
+              request,
+              ensure_ascii=False,
+              separators=(",", ":"),
+          )
           output = Path(os.environ["GITHUB_OUTPUT"])
           with output.open("a", encoding="utf-8") as handle:
-              for key, value in values.items():
-                  if "\n" in value or "\r" in value:
-                      raise ValueError(f"{key} must be one line")
-                  handle.write(f"{key}={value}\n")
+              handle.write("request_json<<AITUBE_REQUEST\n")
+              handle.write(compact + "\n")
+              handle.write("AITUBE_REQUEST\n")
           PY
 
   fetch:
     needs: request
-    uses: organicoverlords/AITubeTranscript/.github/workflows/fetch.yml@main
+    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@main
     with:
-      video_url: ${{ needs.request.outputs.video_url }}
-      languages: ${{ needs.request.outputs.languages }}
-      comments: ${{ needs.request.outputs.comments }}
-      whisper: ${{ needs.request.outputs.whisper == 'true' }}
+      request_json: ${{ needs.request.outputs.request_json }}
     secrets:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
