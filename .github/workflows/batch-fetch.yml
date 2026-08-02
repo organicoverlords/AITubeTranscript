@@ -1,0 +1,267 @@
+name: Private AITube batch fetch
+
+on:
+  workflow_call:
+    inputs:
+      request_json:
+        description: Compact JSON request containing videos or playlists
+        required: true
+        type: string
+      tool_ref:
+        description: AITubeTranscript branch, tag, or commit
+        required: false
+        default: main
+        type: string
+    outputs:
+      batch_id:
+        description: Batch request identifier
+        value: ${{ jobs.fetch.outputs.batch_id }}
+      batch_status:
+        description: PROVEN, PARTIAL, or FAILED
+        value: ${{ jobs.fetch.outputs.batch_status }}
+      video_count:
+        description: Number of resolved videos
+        value: ${{ jobs.fetch.outputs.video_count }}
+      private_result_path:
+        description: Private batch result path on aitube-results
+        value: ${{ jobs.fetch.outputs.private_result_path }}
+    secrets:
+      YOUTUBE_API_KEY:
+        description: YouTube Data API key for playlists, metadata, and comments
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: private-aitube-results-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    outputs:
+      batch_id: ${{ steps.batch.outputs.batch_id }}
+      batch_status: ${{ steps.batch.outputs.batch_status }}
+      video_count: ${{ steps.batch.outputs.video_count }}
+      private_result_path: ${{ steps.batch.outputs.private_result_path }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}/tool/src
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+    steps:
+      - name: Require private caller repository
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$REPOSITORY_PRIVATE" = "true" || {
+            echo "::error::AITubeTranscript refuses to run in a public repository."
+            exit 1
+          }
+
+      - name: Check out public tool only
+        uses: actions/checkout@v4
+        with:
+          repository: organicoverlords/AITubeTranscript
+          ref: ${{ inputs.tool_ref }}
+          path: tool
+          fetch-depth: 1
+
+      - name: Prove dependency-free batch runtime
+        run: |
+          python3 -S -c \
+            "import aitubetranscript.batch, aitubetranscript.cloud_fast; print('BATCH_IMPORT=PROVEN')"
+
+      - name: Validate private request
+        env:
+          REQUEST_JSON: ${{ inputs.request_json }}
+        run: |
+          python3 -S - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from aitubetranscript.batch import normalize_batch_request
+
+          raw = os.environ["REQUEST_JSON"]
+          request = json.loads(raw)
+          normalized = normalize_batch_request(request)
+          Path(os.environ["RUNNER_TEMP"], "aitube-request.json").write_text(
+              json.dumps(request, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(
+              "REQUEST_MODE="
+              + ("PLAYLIST_OR_MIXED" if normalized["playlist_urls"] else "VIDEOS")
+          )
+          print(f"MAX_VIDEOS={normalized['max_videos']}")
+          print(f"CONCURRENCY={normalized['concurrency']}")
+          PY
+
+      - id: batch
+        name: Fetch and account for every selected video
+        run: |
+          set -euo pipefail
+          set +e
+          python3 -S -m aitubetranscript.batch \
+            "$RUNNER_TEMP/aitube-request.json" \
+            --output "$RUNNER_TEMP/results" \
+            --fast-cloud \
+            | tee "$RUNNER_TEMP/aitube-batch.txt"
+          batch_exit=${PIPESTATUS[0]}
+          set -e
+
+          batch_id="$(grep '^BATCH_ID=' "$RUNNER_TEMP/aitube-batch.txt" | cut -d= -f2-)"
+          test -n "$batch_id"
+          receipt="$RUNNER_TEMP/results/batches/$batch_id/batch-receipt.json"
+          test -f "$receipt"
+
+          python3 -S - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          from pathlib import Path
+
+          batch_id = Path(
+              os.environ["RUNNER_TEMP"], "aitube-batch.txt"
+          ).read_text(encoding="utf-8").split("BATCH_ID=", 1)[1].splitlines()[0]
+          receipt = json.loads(
+              Path(
+                  os.environ["RUNNER_TEMP"],
+                  "results",
+                  "batches",
+                  batch_id,
+                  "batch-receipt.json",
+              ).read_text(encoding="utf-8")
+          )
+          print(f"batch_id={batch_id}")
+          print(f"batch_status={receipt['status']}")
+          print(f"video_count={receipt['resolved_video_count']}")
+          print(f"private_result_path=batches/{batch_id}/latest/")
+          PY
+          echo "batch_exit=$batch_exit" >> "$GITHUB_OUTPUT"
+
+      - name: Verify batch and per-video accounting
+        env:
+          BATCH_ID: ${{ steps.batch.outputs.batch_id }}
+        run: |
+          python3 -S - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "results"
+          batch_root = root / "batches" / os.environ["BATCH_ID"]
+          receipt = json.loads(
+              (batch_root / "batch-receipt.json").read_text(encoding="utf-8")
+          )
+          reader = json.loads(
+              (batch_root / "batch-reader-manifest.json").read_text(encoding="utf-8")
+          )
+
+          coverage = receipt["coverage"]
+          assert coverage["status"] == "PROVEN", coverage
+          assert coverage["exactly_once"] is True, coverage
+          assert coverage["missing_indices"] == [], coverage
+          assert coverage["duplicate_indices"] == [], coverage
+          assert coverage["unexpected_indices"] == [], coverage
+          assert coverage["ordered_contiguous"] is True, coverage
+          assert reader["batch_id"] == receipt["batch_id"], reader
+
+          for result in receipt["results"]:
+              if result["status"] == "FAILED":
+                  continue
+              video_root = root / result["video_id"]
+              video_receipt = json.loads(
+                  (video_root / "receipt.json").read_text(encoding="utf-8")
+              )
+              assert video_receipt["video_id"] == result["video_id"]
+              assert (video_root / "reader-manifest.json").is_file()
+          print("BATCH_ACCOUNTING=PROVEN")
+          PY
+
+      - name: Publish batch and video bundles privately
+        env:
+          BATCH_ID: ${{ steps.batch.outputs.batch_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/results/batches/$BATCH_ID/batch-receipt.json"
+          test -f "$receipt"
+
+          mkdir "$RUNNER_TEMP/vault"
+          cd "$RUNNER_TEMP/vault"
+          git init -q
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          if git fetch --depth=1 --filter=blob:none origin aitube-results; then
+            git sparse-checkout init --no-cone
+            python3 -S - <<'PY' > .git/info/sparse-checkout
+          import json
+          import os
+          from pathlib import Path
+
+          receipt = json.loads(
+              Path(
+                  os.environ["RUNNER_TEMP"],
+                  "results",
+                  "batches",
+                  os.environ["BATCH_ID"],
+                  "batch-receipt.json",
+              ).read_text(encoding="utf-8")
+          )
+          print("/README.md")
+          print(f"/batches/{receipt['batch_id']}/latest/")
+          for result in receipt["results"]:
+              if result["status"] != "FAILED":
+                  print(f"/videos/{result['video_id']}/latest/")
+          PY
+            git checkout -q -B aitube-results FETCH_HEAD
+          else
+            git checkout -q --orphan aitube-results
+            printf '# Private AITube results\n\nGenerated bundles are private.\n' \
+              > README.md
+          fi
+
+          python3 -S - <<'PY'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          source_root = Path(os.environ["RUNNER_TEMP"]) / "results"
+          vault = Path(os.environ["RUNNER_TEMP"]) / "vault"
+          batch_id = os.environ["BATCH_ID"]
+          receipt = json.loads(
+              (source_root / "batches" / batch_id / "batch-receipt.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+
+          batch_target = vault / "batches" / batch_id / "latest"
+          shutil.rmtree(batch_target, ignore_errors=True)
+          shutil.copytree(source_root / "batches" / batch_id, batch_target)
+
+          for result in receipt["results"]:
+              if result["status"] == "FAILED":
+                  continue
+              video_id = result["video_id"]
+              video_target = vault / "videos" / video_id / "latest"
+              shutil.rmtree(video_target, ignore_errors=True)
+              shutil.copytree(source_root / video_id, video_target)
+          PY
+
+          git add README.md batches videos
+          git commit -m "Private batch $BATCH_ID" || true
+          git push origin HEAD:aitube-results
+
+      - name: Fail after publishing incomplete batch evidence
+        if: steps.batch.outputs.batch_exit != '0'
+        env:
+          BATCH_STATUS: ${{ steps.batch.outputs.batch_status }}
+        run: |
+          echo "::error::Batch completed with status $BATCH_STATUS. Private evidence was published."
+          exit 1
