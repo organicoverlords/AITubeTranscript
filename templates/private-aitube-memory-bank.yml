@@ -1,0 +1,68 @@
+name: Private AITube memory bank
+
+on:
+  workflow_run:
+    workflows:
+      - Private AITube fetch
+      - Private AITube request
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: private-aitube-memory-bank
+  cancel-in-progress: false
+
+jobs:
+  index:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require private repository
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          test "$REPOSITORY_PRIVATE" = "true" || {
+            echo "::error::The AITube memory bank must run in a private repository."
+            exit 1
+          }
+
+      - name: Check out public indexer
+        uses: actions/checkout@v4
+        with:
+          repository: organicoverlords/AITubeTranscript
+          ref: main
+          path: tool
+          fetch-depth: 1
+
+      - name: Check out private results
+        uses: actions/checkout@v4
+        with:
+          ref: aitube-results
+          path: vault
+          fetch-depth: 1
+
+      - name: Rebuild stable and logical memory indexes
+        env:
+          PYTHONPATH: ${{ github.workspace }}/tool/src
+        run: |
+          set -euo pipefail
+          python3 -S -m aitubetranscript.memory_bank \
+            --vault "$GITHUB_WORKSPACE/vault" \
+            --rebuild-all
+
+      - name: Commit private memory bank
+        working-directory: vault
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add memory videos
+          git commit -m "Update private AITube memory bank" || exit 0
+          git push origin HEAD:aitube-results
