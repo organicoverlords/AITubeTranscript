@@ -1,65 +1,59 @@
 # AITubeTranscript
 
-Fetch a YouTube video's **full available transcript**, metadata, description, and a bounded sample of comments. Every run writes human-readable files plus machine-readable proof receipts.
+**Private-first YouTube research for humans and GPT agents.** Fetch a video's available transcript, full description, metadata, and a bounded set of top-level comments; store the result privately; and prove that every retrieved segment and comment is represented exactly once.
 
-The source code is public and reusable. **Supported GitHub execution is private-only:** requests, workflow logs, transcripts, descriptions, comments, and receipts must live in a private companion repository.
+The source code is public. The supported GitHub workflow refuses public callers so requests, logs, transcripts, descriptions, comments, and receipts stay in a private companion repository.
 
-## Privacy model
+## What it produces
 
-The official GitHub Action and reusable workflow refuse to run when the caller repository is public.
-
-- The public repository contains source code, tests, and documentation only.
-- The public repository has no issue-triggered or manually dispatched video-fetch workflow.
-- The former public live-video smoke test has been replaced with a static privacy regression test.
-- Private callers publish generated bundles only to their own private `aitube-results` branch.
-- Local CLI and Docker runs remain local unless the user deliberately uploads their outputs.
-
-A user can always modify code in their own fork. This project can enforce privacy for the official workflows and supported setup, but it cannot prevent someone from intentionally writing a different workflow that publishes their own data.
-
-## Retrieval ladder
-
-Transcript retrieval runs first so unavailable metadata or comment services cannot delay a usable transcript:
-
-1. `youtube-transcript-api` for manual or automatic captions.
-2. Caption tracks exposed by `yt-dlp`, with Deno/EJS challenge solving and alternate non-web clients.
-3. Hosted no-key transcript fallbacks when cloud IPs cannot reach YouTube captions directly.
-4. Optional `faster-whisper` audio transcription when captions do not exist.
-
-Metadata and comments use independent fallbacks:
-
-1. Direct `yt-dlp` extraction.
-2. Optional official YouTube Data API using `YOUTUBE_API_KEY`.
-3. YouTube oEmbed for basic title/channel metadata.
-4. Public Piped and Invidious APIs.
-
-Each attempt and selected source is written to `receipt.json`. Missing data remains `NOT_PROVEN` rather than being represented as complete.
-
-## Complete transcript consumption proof
-
-Large transcript files can be truncated by API clients, chat connectors, or browser previews even when retrieval succeeded. Every successful run therefore produces three additional representations:
-
-- `transcript.jsonl` contains exactly one canonical JSON record per segment.
-- `chunks/001.md`, `chunks/002.md`, and so on contain bounded-size readable groups of whole segments.
-- `transcript-manifest.json` records every chunk range and hash, the JSONL hash, missing or duplicated indices, ordering, and an `exactly_once` result.
-
-Chunk files target at most 10,000 UTF-8 bytes and 40 segments. A single unusually large segment is kept whole and marked as an oversized single-segment chunk rather than silently split or omitted.
-
-`receipt.json` hashes every generated file, including nested chunk files, and reports `transcript_coverage_status`. A transcript is safe to claim as completely represented when both conditions hold:
+Each private result is written to:
 
 ```text
-transcript_status = PROVEN
-transcript_coverage_status = PROVEN
+aitube-results/videos/<video-id>/latest/
 ```
 
-## Private GitHub setup
+```text
+latest/
+├── reader-manifest.json
+├── receipt.json
+├── description.md
+├── transcript.md
+├── transcript.txt
+├── transcript.jsonl
+├── transcript-manifest.json
+├── chunks/
+│   ├── 001.md
+│   └── ...
+├── comments.md
+├── comments.jsonl
+├── comments-manifest.json
+├── comment-chunks/
+│   ├── 001.md
+│   └── ...
+└── result.json
+```
 
-Create a **private** companion repository and add an Actions secret named:
+`reader-manifest.json` is the entry point for an automated reader. It lists the exact bounded files to open, their deterministic order, and groups that may be read in parallel.
+
+## Fast private GitHub setup
+
+### 1. Create a private companion repository
+
+Generated research must not be stored in this public repository. Create a private repository under your own account or organization.
+
+### 2. Add one repository secret
+
+In the private repository, create an Actions secret named:
 
 ```text
 YOUTUBE_API_KEY
 ```
 
-Add this caller workflow to the private repository as `.github/workflows/aitube.yml`:
+Use your own YouTube Data API key. Do not commit or paste the key into issues, workflow files, transcripts, or chat.
+
+### 3. Add the private caller workflow
+
+Create `.github/workflows/aitube.yml` in the private repository:
 
 ```yaml
 name: Private YouTube research
@@ -72,7 +66,7 @@ on:
         required: true
         type: string
       languages:
-        description: Caption language priority
+        description: Comma-separated language priority
         required: false
         default: en
         type: string
@@ -81,6 +75,11 @@ on:
         required: false
         default: "100"
         type: string
+      whisper:
+        description: Use Whisper only when captions are unavailable
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -92,121 +91,119 @@ jobs:
       video_url: ${{ inputs.video_url }}
       languages: ${{ inputs.languages }}
       comments: ${{ inputs.comments }}
+      whisper: ${{ inputs.whisper }}
     secrets:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
 ```
 
-Run it from the private repository's **Actions** page. Results are committed only to its private branch:
+Run **Private YouTube research** from the private repository's Actions page. The optimized cloud path uses the runner's existing Python runtime, shallow-checks out only this small public tool, verifies coverage, and shallow-fetches only the required private result path before publishing.
+
+## GPT-optimized operation
+
+For an agent with GitHub access, use a stable private request branch and one request file instead of creating a pull request for every video:
 
 ```text
-aitube-results/videos/<video-id>/latest/
+request branch: request/aitube-live
+request file:   aitube-requests/current.json
+results branch: aitube-results
 ```
 
-The private workflow does not upload transcript artifacts and does not print transcript text into logs.
+Canonical agent instructions:
 
-## Fast local use
+- [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md) — exact request, polling, proof, reading, timing, fallback, and privacy contract.
+- [`GPT_MEMORY.md`](GPT_MEMORY.md) — copy-paste memory instructions, including a prefilled deployment and a generic template.
+
+The core rule is simple: **workflow success is not proof that every word was read**. GPT must verify the manifests and actually open every file listed in `reader-manifest.json` before claiming complete reading.
+
+## Proof contract
+
+A retrieved transcript may be claimed as completely represented only when:
+
+```text
+receipt.transcript_status = PROVEN
+receipt.transcript_coverage_status = PROVEN
+transcript-manifest.coverage.status = PROVEN
+transcript-manifest.coverage.exactly_once = true
+```
+
+The transcript coverage manifest must also show:
+
+```text
+missing_indices = []
+duplicate_indices = []
+unexpected_indices = []
+ordered_contiguous = true
+```
+
+When comments were requested, apply the equivalent requirements to `comments_status`, `comments_coverage_status`, and `comments-manifest.json`.
+
+This proves **retrieval representation**, not perfect transcription accuracy. Automatic captions and third-party transcript providers can contain repeated words, punctuation defects, and incorrect names. Important quotations should be checked against the original video.
+
+## Retrieval strategy
+
+The optimized GitHub path prioritizes low-latency cloud-compatible sources:
+
+1. official YouTube Data API for description, metadata, and comments
+2. available caption and public transcript endpoints
+3. repository fallback ladder when the fast path fails
+4. optional Whisper only when captions cannot be retrieved
+
+The standard local path additionally supports `youtube-transcript-api`, `yt-dlp`, Deno/EJS challenge solving, cookies, proxies, and Whisper.
+
+Every attempt and selected source is recorded in `receipt.json`. Missing data remains `NOT_PROVEN`; it is never silently described as complete.
+
+## Local CLI
 
 Python 3.10 or newer:
 
 ```bash
 pipx install git+https://github.com/organicoverlords/AITubeTranscript.git
-aitube-transcript "https://www.youtube.com/watch?v=x8W_S9zmodk" --languages en --comments 100
+aitube-transcript "https://www.youtube.com/watch?v=x8W_S9zmodk" \
+  --languages en \
+  --comments 100
 ```
 
-Outputs remain on the local machine:
-
-```text
-results/<video-id>/
-├── transcript.md
-├── transcript.txt
-├── transcript.jsonl
-├── transcript-manifest.json
-├── chunks/
-│   ├── 001.md
-│   ├── 002.md
-│   └── ...
-├── description.md
-├── comments.md
-├── result.json
-└── receipt.json
-```
-
-For videos without captions:
-
-```bash
-pipx install "git+https://github.com/organicoverlords/AITubeTranscript.git#egg=aitube-transcript[whisper]"
-aitube-transcript VIDEO_URL --whisper --whisper-model tiny
-```
-
-For reliable descriptions and comments, set the API key locally without committing it:
+Set the API key locally for reliable descriptions and comments:
 
 ```bash
 export YOUTUBE_API_KEY="your-key"
-aitube-transcript VIDEO_URL --comments 100
 ```
 
 Windows PowerShell:
 
 ```powershell
 $env:YOUTUBE_API_KEY = "your-key"
-aitube-transcript VIDEO_URL --comments 100
 ```
 
-## Direct composite Action use
-
-The composite Action also rejects public caller repositories:
-
-```yaml
-- uses: organicoverlords/AITubeTranscript@main
-  id: youtube
-  env:
-    YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-  with:
-    url: https://www.youtube.com/watch?v=x8W_S9zmodk
-    languages: en,fi
-    comments: 100
-```
-
-Prefer the reusable workflow because it automatically writes results to the private `aitube-results` branch.
-
-## Docker
+For a video without retrievable captions:
 
 ```bash
-docker build -t aitube-transcript .
-docker run --rm -v "$PWD/results:/app/results" aitube-transcript VIDEO_URL
+pipx install "git+https://github.com/organicoverlords/AITubeTranscript.git#egg=aitube-transcript[whisper]"
+aitube-transcript VIDEO_URL --whisper --whisper-model tiny
 ```
+
+Local outputs remain under `results/<video-id>/` unless the user deliberately uploads them.
 
 ## Cookies and restricted videos
 
-Export a Netscape-format `cookies.txt` locally and pass:
+For local use only, export Netscape-format cookies and pass:
 
 ```bash
 aitube-transcript VIDEO_URL --cookies /path/to/cookies.txt
 ```
 
-Never commit cookies. They can grant access to a YouTube account.
+Never commit cookies. They can grant access to a YouTube account. Official private GitHub setup does not require or distribute cookies.
 
-## Third-party fallback privacy
+## Privacy boundaries
 
-When direct YouTube retrieval fails, the tool may send only the public video ID and requested language to hosted transcript providers, Piped, the official Invidious instance registry, and eligible public Invidious instances. It never sends cookies or API keys to these fallback services. The chosen source is visible in the receipt.
+- Public repository: source, tests, documentation, reusable workflow.
+- Private repository: request file, Actions logs, generated research, API secret.
+- Public workflow execution: rejected.
+- Transcript artifacts: not uploaded through GitHub Actions artifacts.
+- API keys and cookies: never included in generated files.
 
-## Repository protection
-
-`main` includes CODEOWNERS, a destructive-change guard, SHA-256 integrity manifests, complete Git-bundle backups, and optional mirroring to a separate private repository. See `REPOSITORY_PROTECTION.md` for recovery controls.
-
-## What the receipt proves
-
-`receipt.json` includes:
-
-- transcript and comment status (`PROVEN` or `NOT_PROVEN`)
-- transcript coverage status (`PROVEN`, `REJECTED`, or `NOT_APPLICABLE`)
-- selected transcript source
-- segment, chunk, and comment counts
-- failed fallback attempts and warnings
-- SHA-256 hashes for every generated file
-
-A successful command does not automatically mean every data class was retrieved. Read the receipt and transcript manifest statuses.
+A user can deliberately modify their own fork to publish data. This project enforces privacy for the official workflow and documented setup; it cannot prevent intentional publication by modified code.
 
 ## Legal and responsible use
 
-Use the tool for videos you are allowed to access. Respect copyright, privacy, YouTube's terms, and applicable law. Transcripts and comments remain content from their respective creators; the MIT license applies to this software, not to downloaded content.
+Use the tool only for videos you are allowed to access. Respect copyright, privacy, YouTube's terms, and applicable law. The MIT license applies to this software, not to downloaded transcripts, descriptions, or comments.

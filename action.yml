@@ -1,5 +1,5 @@
 name: AITubeTranscript
-description: Fetch a YouTube transcript, description, metadata, comments, and proof receipt
+description: Private-first YouTube transcript, description, comment, and coverage-proof fetcher
 inputs:
   url:
     description: YouTube URL or video ID
@@ -38,22 +38,12 @@ runs:
           echo "Create a private companion repository and call the reusable private workflow."
           exit 1
         fi
-    - uses: denoland/setup-deno@v2
-      with:
-        deno-version: v2.x
-    - shell: bash
-      env:
-        INPUT_WHISPER: ${{ inputs.whisper }}
-      run: |
-        set -euo pipefail
-        if [[ "$INPUT_WHISPER" == "true" ]]; then
-          python -m pip install "${GITHUB_ACTION_PATH}[whisper]"
-        else
-          python -m pip install "$GITHUB_ACTION_PATH"
-        fi
+
     - id: fetch
+      name: Fetch and verify private bundle
       shell: bash
       env:
+        PYTHONPATH: ${{ github.action_path }}/src
         INPUT_URL: ${{ inputs.url }}
         INPUT_LANGUAGES: ${{ inputs.languages }}
         INPUT_COMMENTS: ${{ inputs.comments }}
@@ -61,8 +51,30 @@ runs:
         INPUT_OUTPUT: ${{ inputs.output }}
       run: |
         set -euo pipefail
-        args=("$INPUT_URL" --languages "$INPUT_LANGUAGES" --comments "$INPUT_COMMENTS" --output "$INPUT_OUTPUT")
-        if [[ "$INPUT_WHISPER" == "true" ]]; then args+=(--whisper); fi
-        aitube-transcript "${args[@]}" | tee aitube-run.txt
-        output_directory="$(grep '^OUTPUT_DIR=' aitube-run.txt | cut -d= -f2-)"
+        args=(
+          "$INPUT_URL"
+          --languages "$INPUT_LANGUAGES"
+          --comments "$INPUT_COMMENTS"
+          --output "$INPUT_OUTPUT"
+        )
+
+        if [[ "$INPUT_WHISPER" == "true" ]]; then
+          python3 -m venv "$RUNNER_TEMP/aitube-action-venv"
+          "$RUNNER_TEMP/aitube-action-venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            "${GITHUB_ACTION_PATH}[whisper]"
+          "$RUNNER_TEMP/aitube-action-venv/bin/python" -m aitubetranscript.cli \
+            "${args[@]}" --whisper | tee "$RUNNER_TEMP/aitube-run.txt"
+        else
+          python3 -S -c \
+            "import aitubetranscript.cli, aitubetranscript.cloud_fast; print('CLOUD_FAST_IMPORT=PROVEN')"
+          python3 -S -m aitubetranscript.cli \
+            "${args[@]}" --fast-cloud | tee "$RUNNER_TEMP/aitube-run.txt"
+        fi
+
+        output_directory="$(grep '^OUTPUT_DIR=' "$RUNNER_TEMP/aitube-run.txt" | cut -d= -f2-)"
+        test -n "$output_directory"
+        test -f "$output_directory/receipt.json"
+        test -f "$output_directory/reader-manifest.json"
         echo "output_directory=$output_directory" >> "$GITHUB_OUTPUT"
