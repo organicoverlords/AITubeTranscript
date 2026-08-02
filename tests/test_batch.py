@@ -23,7 +23,7 @@ def test_extract_playlist_id_from_playlist_and_watch_urls() -> None:
     )
 
 
-def test_normalize_batch_request_supports_single_multiple_and_playlist() -> None:
+def test_normalize_batch_request_supports_videos_playlists_and_channels() -> None:
     request = batch.normalize_batch_request(
         {
             "request_id": "batch-test",
@@ -33,8 +33,11 @@ def test_normalize_batch_request_supports_single_multiple_and_playlist() -> None
                 "https://www.youtube.com/watch?v=x8W_S9zmodk",
             ],
             "playlist_url": "PL1234567890ABCDE",
+            "channel_url": "https://www.youtube.com/@example",
+            "research_channel_videos": True,
             "comments": 25,
             "max_videos": 50,
+            "catalog_max_videos": 500,
             "concurrency": 3,
         }
     )
@@ -44,8 +47,11 @@ def test_normalize_batch_request_supports_single_multiple_and_playlist() -> None
         "https://www.youtube.com/watch?v=x8W_S9zmodk",
     ]
     assert request["playlist_urls"] == ["PL1234567890ABCDE"]
+    assert request["channel_urls"] == ["https://www.youtube.com/@example"]
+    assert request["research_channel_videos"] is True
     assert request["comments"] == 25
     assert request["max_videos"] == 50
+    assert request["catalog_max_videos"] == 500
     assert request["concurrency"] == 3
 
 
@@ -83,6 +89,7 @@ def test_fetch_playlist_video_ids_paginates_and_slices(
     assert metadata["selected_count"] == 2
     assert metadata["catalog_exhausted"] is True
     assert metadata["truncated_by_limit"] is False
+    assert metadata["next_start_index"] is None
 
 
 def test_run_batch_writes_proven_accounting(
@@ -92,8 +99,8 @@ def test_run_batch_writes_proven_accounting(
     video_ids = ["JsrwIGbuM8o", "x8W_S9zmodk"]
     monkeypatch.setattr(
         batch,
-        "resolve_batch_video_ids",
-        lambda _request, _key: (video_ids, [], 0),
+        "_resolve_sources",
+        lambda _request, _key, _output: (video_ids, [], [], 0),
     )
 
     def fake_fetch_one(video_id, *_args, **_kwargs):
@@ -132,3 +139,47 @@ def test_run_batch_writes_proven_accounting(
         (destination / "batch-reader-manifest.json").read_text(encoding="utf-8")
     )
     assert len(reader["private_read_order"]) == 3
+
+
+def test_catalog_only_batch_can_be_proven(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    channel = {
+        "channel_id": "UC1234567890123456789012",
+        "channel_title": "Example",
+        "requested_reference": "@example",
+        "status": "PROVEN",
+        "video_count": 2,
+        "unavailable_video_count": 0,
+        "catalog_exhausted": True,
+        "truncated_by_limit": False,
+        "next_start_index": None,
+        "private_result_path": "channels/UC1234567890123456789012/latest/",
+        "local_result_path": "ignored",
+    }
+    monkeypatch.setattr(
+        batch,
+        "_resolve_sources",
+        lambda _request, _key, _output: ([], [], [channel], 0),
+    )
+
+    receipt, destination = batch.run_batch(
+        {
+            "request_id": "channel-catalog-proof",
+            "channel_url": "@example",
+            "research_channel_videos": False,
+        },
+        tmp_path,
+        youtube_api_key="test-key",
+        fast_cloud=True,
+    )
+
+    assert receipt["status"] == "PROVEN"
+    assert receipt["resolved_video_count"] == 0
+    assert receipt["channel_catalog_status"] == "PROVEN"
+    assert receipt["coverage"]["exactly_once"] is True
+    reader = json.loads(
+        (destination / "batch-reader-manifest.json").read_text(encoding="utf-8")
+    )
+    assert reader["private_read_order"][1].startswith("channels/")
