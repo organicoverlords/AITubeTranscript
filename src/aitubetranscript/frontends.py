@@ -4,7 +4,7 @@ import ipaddress
 import json
 import re
 from typing import Any
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from .models import TranscriptData, TranscriptSegment
