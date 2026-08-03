@@ -291,15 +291,33 @@ def _manifest_chunks(source: Path, manifest: dict[str, Any]) -> list[str]:
     for key in ("chunks", "files"):
         value = manifest.get(key)
         if isinstance(value, list):
-            return [str(item) for item in value]
+            return _normalize_chunk_entries(value)
     reader_path = source / "reader-manifest.json"
     if reader_path.is_file():
         reader = read_json(reader_path)
         section = reader.get("transcript") or {}
         chunks = section.get("chunks")
         if isinstance(chunks, list):
-            return [str(item) for item in chunks]
+            return _normalize_chunk_entries(chunks)
     return sorted(
         path.relative_to(source).as_posix()
         for path in (source / "chunks").glob("*.md")
     )
+
+
+def _normalize_chunk_entries(entries: list[Any]) -> list[str]:
+    paths: list[str] = []
+    for entry in entries:
+        if isinstance(entry, str):
+            raw = entry
+        elif isinstance(entry, dict):
+            raw = entry.get("path") or entry.get("file") or entry.get("filename")
+            if not raw:
+                raise ValueError("structured transcript chunk entry has no path")
+        else:
+            raise TypeError("transcript chunk entry must be a path string or object")
+        candidate = Path(str(raw))
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValueError(f"unsafe transcript chunk path: {raw}")
+        paths.append(candidate.as_posix())
+    return paths
