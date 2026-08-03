@@ -157,9 +157,19 @@ def migrate_legacy_results(
 def _ensure_legacy_transcript_manifest(
     source: Path, receipt: dict[str, Any]
 ) -> bool:
-    """Create a verified one-chunk manifest for an old monolithic transcript."""
+    """Normalize proven legacy transcript coverage for durable publication."""
     manifest_path = source / "transcript-manifest.json"
     if manifest_path.is_file():
+        manifest = read_json(manifest_path)
+        manifest_status = str(
+            (manifest.get("coverage") or {}).get("status") or ""
+        )
+        if (
+            not receipt.get("transcript_coverage_status")
+            and manifest_status == "PROVEN"
+        ):
+            receipt["transcript_coverage_status"] = "PROVEN"
+            write_json(source / "receipt.json", receipt)
         return False
 
     transcript_path = source / "transcript.md"
@@ -250,6 +260,8 @@ def _ensure_legacy_transcript_manifest(
                 },
             },
         )
+    receipt["transcript_coverage_status"] = "PROVEN"
+    write_json(source / "receipt.json", receipt)
     return True
 
 
