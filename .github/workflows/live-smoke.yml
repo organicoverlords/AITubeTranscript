@@ -24,6 +24,9 @@ jobs:
           action = Path("action.yml").read_text(encoding="utf-8")
           fetch = Path(".github/workflows/fetch.yml").read_text(encoding="utf-8")
           batch = Path(".github/workflows/batch-fetch.yml").read_text(encoding="utf-8")
+          maintenance = Path(
+              ".github/workflows/volatile-maintenance.yml"
+          ).read_text(encoding="utf-8")
           smoke = Path(".github/workflows/live-smoke.yml").read_text(encoding="utf-8")
 
           artifact_action = "actions/" + "upload-artifact"
@@ -35,12 +38,30 @@ jobs:
           assert "workflow_call:" in fetch
           assert "workflow_dispatch:" not in fetch
           assert "issues:" not in fetch
+
+          assert "workflow_call:" in batch
           assert "github.event.repository.private" in batch
-          assert "aitube-results" in batch
-          assert "aitubetranscript.snapshot_store" in batch
-          assert "memory retention batches" in batch
+          assert "refuses to run in a public repository" in batch
+          assert "aitube-durable" in batch
+          assert "aitube-volatile" in batch
+          assert "aitubetranscript.split_store" in batch
+          assert "STORAGE_BOUNDARY=PROVEN" in batch
+          assert "git commit-tree" in batch
+          assert "git push --force" in batch
+          assert "git commit -m" in batch
+          assert "git commit -m" + " " not in batch or "|| true" not in batch
+          assert "aitube-results" not in batch
+
+          assert "workflow_call:" in maintenance
+          assert "github.event.repository.private" in maintenance
+          assert "aitubetranscript.retention_maintenance" in maintenance
+          assert "aitube-volatile" in maintenance
+          assert "git commit-tree" in maintenance
+          assert "git push --force" in maintenance
+
           assert artifact_action not in fetch
           assert artifact_action not in batch
+          assert artifact_action not in maintenance
           assert old_live_step not in smoke
           assert f'{fetch_command} "http' not in smoke
           assert artifact_action not in smoke
