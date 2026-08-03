@@ -2,7 +2,7 @@ name: Privacy smoke
 
 on:
   push:
-    branches: ["agent/**", "security/**"]
+    branches: ["agent/**", "security/**", "release/**"]
   pull_request:
   workflow_dispatch:
 
@@ -19,6 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
+          import re
           from pathlib import Path
 
           action = Path("action.yml").read_text(encoding="utf-8")
@@ -27,17 +28,31 @@ jobs:
           maintenance = Path(
               ".github/workflows/volatile-maintenance.yml"
           ).read_text(encoding="utf-8")
+          request_template = Path(
+              "templates/private-aitube-request.yml"
+          ).read_text(encoding="utf-8")
+          retention_template = Path(
+              "templates/private-aitube-retention.yml"
+          ).read_text(encoding="utf-8")
+          migration_template = Path(
+              "templates/private-aitube-migrate.yml"
+          ).read_text(encoding="utf-8")
+          retired_template = Path(
+              "templates/private-aitube-memory-bank.yml"
+          ).read_text(encoding="utf-8")
           smoke = Path(".github/workflows/live-smoke.yml").read_text(encoding="utf-8")
 
           artifact_action = "actions/" + "upload-artifact"
           old_live_step = "Fetch acceptance " + "video"
           fetch_command = "aitube-" + "transcript"
+          release_sha = "beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f"
 
           assert "CALLER_REPOSITORY_PRIVATE" in action
           assert "refuses to run in a public repository" in action
           assert "workflow_call:" in fetch
           assert "workflow_dispatch:" not in fetch
           assert "issues:" not in fetch
+          assert release_sha in fetch
 
           assert "workflow_call:" in batch
           assert "github.event.repository.private" in batch
@@ -48,8 +63,7 @@ jobs:
           assert "STORAGE_BOUNDARY=PROVEN" in batch
           assert "git commit-tree" in batch
           assert "git push --force" in batch
-          assert "git commit -m" in batch
-          assert "git commit -m" + " " not in batch or "|| true" not in batch
+          assert "|| true" not in batch
           assert "aitube-results" not in batch
 
           assert "workflow_call:" in maintenance
@@ -58,6 +72,26 @@ jobs:
           assert "aitube-volatile" in maintenance
           assert "git commit-tree" in maintenance
           assert "git push --force" in maintenance
+
+          for template in (request_template, retention_template, migration_template):
+              assert release_sha in template
+              mutable_refs = re.findall(
+                  r"organicoverlords/AITubeTranscript/[^\s@]+@([^\s]+)",
+                  template,
+              )
+              assert mutable_refs
+              assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in mutable_refs)
+              assert artifact_action not in template
+
+          assert "schedule:" in retention_template
+          assert "workflow_dispatch:" in retention_template
+          assert "aitubetranscript.legacy_split_migration" in migration_template
+          assert "aitube-results" in migration_template
+          assert "aitube-durable" in migration_template
+          assert "aitube-volatile" in migration_template
+          assert "retired" in retired_template.lower()
+          assert "exit 1" in retired_template
+          assert "git push" not in retired_template
 
           assert artifact_action not in fetch
           assert artifact_action not in batch
