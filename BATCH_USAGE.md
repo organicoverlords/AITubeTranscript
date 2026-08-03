@@ -187,6 +187,38 @@ For each video:
 
 Always inspect the request profile before deciding that a snapshot satisfies the current question.
 
+## Reading a fetched batch
+
+Fetch completion does not mean the transcripts were read.
+
+Declare one mode:
+
+```text
+CATALOG_SCAN
+TRANSCRIPT_COMPLETE
+FULL_RESEARCH_COMPLETE
+DEEP_SYNTHESIS
+```
+
+For `TRANSCRIPT_COMPLETE`:
+
+1. open the batch receipt and require exactly-once accounting;
+2. resolve every selected video through `memory/by-video-id/<VIDEO_ID>.json`;
+3. select the correct immutable snapshot for each video;
+4. open every selected `reader-manifest.json`;
+5. build a per-video reading ledger;
+6. open every transcript file listed in every selected manifest;
+7. require expected and opened transcript-file counts to match for every video;
+8. require no missing video IDs or reader files before claiming all transcripts were read.
+
+For `FULL_RESEARCH_COMPLETE`, open every applicable description, transcript, and comment file in each manifest's complete `read_order`.
+
+Process large batches in bounded groups, normally four or five videos at a time, and preserve compact per-video notes before moving to the next group. Use `parallel_read_groups` only when the connector actually supports parallel reading.
+
+When timing matters, report fetch, manifest-selection, reading, synthesis, and total time separately. Use measured values where available and label estimates clearly. A fast fetch duration must never be presented as transcript-reading time.
+
+Complete rules and the recommended final reading receipt are in [`READING_WORKFLOW.md`](READING_WORKFLOW.md).
+
 ## Retention and untrusted content
 
 API-backed snapshots record refresh and delete-or-refresh deadlines under `retention/`. Current automation records deadlines but does not yet claim automatic refresh or purge.
@@ -198,6 +230,7 @@ See:
 - [`SNAPSHOT_STORAGE.md`](SNAPSHOT_STORAGE.md)
 - [`YOUTUBE_DATA_RETENTION.md`](YOUTUBE_DATA_RETENTION.md)
 - [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md)
+- [`READING_WORKFLOW.md`](READING_WORKFLOW.md)
 
 ## Limits
 
