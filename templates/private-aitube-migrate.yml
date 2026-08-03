@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: organicoverlords/AITubeTranscript
-          ref: 959f097eabc884032caa1272f3cbd83b2ee0cf5f
+          ref: 6e127c20dfff6b9de04a5758039fb1f3a354f4fc
           path: tool
           fetch-depth: 1
 

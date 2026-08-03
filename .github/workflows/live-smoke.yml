@@ -46,6 +46,7 @@ jobs:
           old_live_step = "Fetch acceptance " + "video"
           fetch_command = "aitube-" + "transcript"
           release_sha = "959f097eabc884032caa1272f3cbd83b2ee0cf5f"
+          migration_sha = "6e127c20dfff6b9de04a5758039fb1f3a354f4fc"
 
           assert "CALLER_REPOSITORY_PRIVATE" in action
           assert "refuses to run in a public repository" in action
@@ -83,12 +84,12 @@ jobs:
               assert refs == [release_sha]
               assert artifact_action not in template
 
-          assert release_sha in migration_template
+          assert migration_sha in migration_template
           assert (
               "repository: organicoverlords/AITubeTranscript"
               in migration_template
           )
-          assert f"ref: {release_sha}" in migration_template
+          assert f"ref: {migration_sha}" in migration_template
           assert artifact_action not in migration_template
 
           assert "schedule:" in retention_template
