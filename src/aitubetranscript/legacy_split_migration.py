@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,7 @@ from .durable_store import (
     publish_durable_video,
     rebuild_durable_indexes,
 )
-from .storage_common import read_json
+from .storage_common import read_json, write_json
 from .volatile_store import (
     DEFAULT_REFRESH_DAYS,
     DEFAULT_RETENTION_DAYS,
@@ -40,11 +42,14 @@ def migrate_legacy_results(
 
     durable_by_video: dict[str, dict[str, Any]] = {}
     volatile_videos = []
+    reconstructed_monolithic_transcripts = 0
     for source in sorted((legacy_root / "videos").glob("*/latest")):
         if not (source / "receipt.json").is_file():
             continue
         video_id = source.parent.name
         receipt = read_json(source / "receipt.json")
+        if _ensure_legacy_transcript_manifest(source, receipt):
+            reconstructed_monolithic_transcripts += 1
         legacy_memory = _legacy_memory_entry(legacy_root, video_id)
         profile = legacy_memory.get("request_profile") or {}
         durable = publish_durable_video(
@@ -138,12 +143,114 @@ def migrate_legacy_results(
         "channels": len(channel_overlays),
         "durable_batches": len(durable_batches),
         "volatile_batches": len(volatile_batches),
+        "reconstructed_monolithic_transcripts": (
+            reconstructed_monolithic_transcripts
+        ),
         "purged_overlays": purge["removed_count"],
         "durable_index": durable_index,
         "volatile_index": volatile_index,
         "migration_scope": "CURRENTLY_MATERIALIZED_LEGACY_LATEST_ONLY",
         "git_history_recovery": "NOT_ATTEMPTED",
     }
+
+
+def _ensure_legacy_transcript_manifest(
+    source: Path, receipt: dict[str, Any]
+) -> bool:
+    """Create a verified one-chunk manifest for an old monolithic transcript."""
+    manifest_path = source / "transcript-manifest.json"
+    if manifest_path.is_file():
+        return False
+
+    transcript_path = source / "transcript.md"
+    if not transcript_path.is_file():
+        raise FileNotFoundError(
+            f"legacy transcript has neither manifest nor transcript.md: {source}"
+        )
+    if receipt.get("transcript_status") != "PROVEN":
+        raise ValueError(
+            f"legacy monolithic transcript is not proven: {source.parent.name}"
+        )
+    segment_count = int(receipt.get("segment_count") or 0)
+    if segment_count <= 0:
+        raise ValueError(
+            f"legacy monolithic transcript has no positive segment count: "
+            f"{source.parent.name}"
+        )
+
+    actual_sha = hashlib.sha256(transcript_path.read_bytes()).hexdigest()
+    expected_sha = str(
+        (receipt.get("sha256") or {}).get("transcript.md") or ""
+    ).strip()
+    if not expected_sha:
+        raise ValueError(
+            f"legacy monolithic transcript has no recorded transcript.md hash: "
+            f"{source.parent.name}"
+        )
+    if actual_sha != expected_sha:
+        raise ValueError(
+            f"legacy monolithic transcript hash mismatch: {source.parent.name}"
+        )
+
+    chunk_relative = Path("chunks/001.md")
+    chunk_path = source / chunk_relative
+    chunk_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(transcript_path, chunk_path)
+    coverage = {
+        "status": "PROVEN",
+        "exactly_once": True,
+        "missing_indices": [],
+        "duplicate_indices": [],
+        "unexpected_indices": [],
+        "ordered_contiguous": True,
+    }
+    write_json(
+        manifest_path,
+        {
+            "schema_version": "1.1",
+            "video_id": receipt.get("video_id"),
+            "status": "PROVEN",
+            "segment_count": segment_count,
+            "chunks": [
+                {
+                    "path": chunk_relative.as_posix(),
+                    "chunk_number": 1,
+                    "first_segment": 1,
+                    "last_segment": segment_count,
+                    "sha256": actual_sha,
+                }
+            ],
+            "coverage": coverage,
+            "legacy_reconstruction": {
+                "mode": "VERIFIED_MONOLITHIC_TRANSCRIPT_MD",
+                "source_path": "transcript.md",
+                "source_sha256": actual_sha,
+                "refetched": False,
+            },
+        },
+    )
+    reader_path = source / "reader-manifest.json"
+    if not reader_path.is_file():
+        write_json(
+            reader_path,
+            {
+                "schema_version": "1.1",
+                "video_id": receipt.get("video_id"),
+                "transcript": {
+                    "status": "PROVEN",
+                    "segment_count": segment_count,
+                    "manifest": "transcript-manifest.json",
+                    "chunks": [chunk_relative.as_posix()],
+                },
+                "parallel_read_groups": [[chunk_relative.as_posix()]],
+                "read_order": [chunk_relative.as_posix()],
+                "legacy_reconstruction": {
+                    "mode": "VERIFIED_MONOLITHIC_TRANSCRIPT_MD",
+                    "refetched": False,
+                },
+            },
+        )
+    return True
 
 
 def _legacy_memory_entry(root: Path, video_id: str) -> dict[str, Any]:
@@ -178,6 +285,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"MIGRATED_VOLATILE_VIDEOS={result['volatile_videos']}")
     print(f"MIGRATED_CHANNELS={result['channels']}")
     print(f"MIGRATED_BATCHES={result['durable_batches']}")
+    print(
+        "RECONSTRUCTED_MONOLITHIC_TRANSCRIPTS="
+        f"{result['reconstructed_monolithic_transcripts']}"
+    )
     print("LEGACY_SPLIT_MIGRATION=PROVEN")
     return 0
 
