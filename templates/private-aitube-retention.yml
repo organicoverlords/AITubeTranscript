@@ -10,6 +10,6 @@ permissions:
 
 jobs:
   maintain:
-    uses: organicoverlords/AITubeTranscript/.github/workflows/volatile-maintenance.yml@beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
+    uses: organicoverlords/AITubeTranscript/.github/workflows/volatile-maintenance.yml@959f097eabc884032caa1272f3cbd83b2ee0cf5f
     with:
-      tool_ref: beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
+      tool_ref: 959f097eabc884032caa1272f3cbd83b2ee0cf5f
