@@ -24,7 +24,7 @@ keywords = [
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "License :: OSI Approved :: MIT",
+  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -50,6 +50,7 @@ aitube-snapshot-store = "aitubetranscript.snapshot_store:main"
 aitube-split-store = "aitubetranscript.split_store:main"
 aitube-select-snapshot = "aitubetranscript.snapshot_selector:main"
 aitube-retention-maintenance = "aitubetranscript.retention_maintenance:main"
+aitube-legacy-split-migration = "aitubetranscript.legacy_split_migration:main"
 aitube-legacy-backfill = "aitubetranscript.legacy_backfill:main"
 aitube-request = "aitubetranscript.request:main"
 
