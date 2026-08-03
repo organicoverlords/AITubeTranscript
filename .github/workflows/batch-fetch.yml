@@ -1,4 +1,4 @@
-name: Private AITube batch fetch
+name: Private AITube durable and volatile fetch
 
 on:
   workflow_call:
@@ -9,8 +9,7 @@ on:
         type: string
       tool_ref:
         description: Immutable AITubeTranscript commit
-        required: false
-        default: 36c2e71ba199208df1eed3fbd3aa62822376b3a4
+        required: true
         type: string
     outputs:
       batch_id:
@@ -26,8 +25,14 @@ on:
         description: Number of channel catalogs generated
         value: ${{ jobs.fetch.outputs.channel_count }}
       private_result_path:
-        description: Private batch result path on aitube-results
+        description: Durable private batch result path
         value: ${{ jobs.fetch.outputs.private_result_path }}
+      durable_branch:
+        description: Durable transcript evidence branch
+        value: aitube-durable
+      volatile_branch:
+        description: Rewritable YouTube API overlay branch
+        value: aitube-volatile
     secrets:
       YOUTUBE_API_KEY:
         description: YouTube Data API key for playlists, channels, metadata, and comments
@@ -37,7 +42,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: private-aitube-results-${{ github.repository }}
+  group: private-aitube-storage-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -82,10 +87,10 @@ jobs:
           path: tool
           fetch-depth: 1
 
-      - name: Prove dependency-free batch runtime
+      - name: Prove dependency-free split runtime
         run: |
           python3 -S -c \
-            "import aitubetranscript.batch, aitubetranscript.channel, aitubetranscript.snapshot_store; print('BATCH_IMPORT=PROVEN')"
+            "import aitubetranscript.batch, aitubetranscript.channel, aitubetranscript.split_store, aitubetranscript.snapshot_selector; print('SPLIT_IMPORT=PROVEN')"
 
       - name: Validate private request
         env:
@@ -209,24 +214,21 @@ jobs:
           print("BATCH_ACCOUNTING=PROVEN")
           PY
 
-      - name: Publish snapshots, retention, and memory atomically
+      - name: Prepare durable transcript branch
         env:
-          BATCH_ID: ${{ steps.batch.outputs.batch_id }}
           GH_TOKEN: ${{ github.token }}
+          BATCH_ID: ${{ steps.batch.outputs.batch_id }}
         run: |
           set -euo pipefail
-          receipt="$RUNNER_TEMP/results/batches/$BATCH_ID/batch-receipt.json"
-          test -f "$receipt"
-
-          mkdir "$RUNNER_TEMP/vault"
-          cd "$RUNNER_TEMP/vault"
+          mkdir "$RUNNER_TEMP/durable"
+          cd "$RUNNER_TEMP/durable"
           git init -q
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git remote add origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          if git fetch --depth=1 --filter=blob:none origin aitube-results; then
+          if git fetch --depth=1 --filter=blob:none origin aitube-durable; then
             git sparse-checkout init --no-cone
             python3 -S - <<'PY' > .git/info/sparse-checkout
           import json
@@ -244,30 +246,125 @@ jobs:
           )
           print("/README.md")
           print("/memory/")
-          print("/retention/")
           print(f"/batches/{receipt['batch_id']}/")
-          for channel in receipt["channel_catalogs"]:
-              print(f"/channels/{channel['channel_id']}/")
           for result in receipt["results"]:
               if result["status"] != "FAILED":
                   print(f"/videos/{result['video_id']}/")
           PY
-            git checkout -q -B aitube-results FETCH_HEAD
+            git checkout -q -B aitube-durable FETCH_HEAD
           else
-            git checkout -q --orphan aitube-results
-            printf '# Private AITube results and memory bank\n' > README.md
+            git checkout -q --orphan aitube-durable
+            printf '# Durable private AITube transcript evidence\n' > README.md
           fi
 
-          python3 -S -m aitubetranscript.snapshot_store \
-            --source-root "$RUNNER_TEMP/results" \
-            --vault "$RUNNER_TEMP/vault" \
-            --batch-id "$BATCH_ID"
+      - name: Prepare rewritable volatile API branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/volatile"
+          cd "$RUNNER_TEMP/volatile"
+          git init -q
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          git add README.md memory retention batches
-          test ! -d channels || git add channels
-          test ! -d videos || git add videos
-          git commit -m "Private snapshot batch $BATCH_ID" || true
-          git push origin HEAD:aitube-results
+          if git fetch --depth=1 origin aitube-volatile; then
+            git checkout -q -B aitube-volatile FETCH_HEAD
+          else
+            git checkout -q --orphan aitube-volatile
+            printf '# Volatile private AITube API overlays\n' > README.md
+          fi
+
+      - name: Split durable evidence from API overlays
+        env:
+          BATCH_ID: ${{ steps.batch.outputs.batch_id }}
+        run: |
+          set -euo pipefail
+          python3 -S -m aitubetranscript.split_store \
+            --source-root "$RUNNER_TEMP/results" \
+            --durable-root "$RUNNER_TEMP/durable" \
+            --volatile-root "$RUNNER_TEMP/volatile" \
+            --batch-id "$BATCH_ID" \
+            | tee "$RUNNER_TEMP/aitube-split.txt"
+          grep -q '^DURABLE_VOLATILE_SPLIT=PROVEN$' \
+            "$RUNNER_TEMP/aitube-split.txt"
+
+      - name: Verify storage boundary
+        env:
+          BATCH_ID: ${{ steps.batch.outputs.batch_id }}
+        run: |
+          python3 -S - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          durable = Path(os.environ["RUNNER_TEMP"], "durable")
+          volatile = Path(os.environ["RUNNER_TEMP"], "volatile")
+          receipt = json.loads(
+              Path(
+                  os.environ["RUNNER_TEMP"],
+                  "results",
+                  "batches",
+                  os.environ["BATCH_ID"],
+                  "batch-receipt.json",
+              ).read_text(encoding="utf-8")
+          )
+          forbidden = {
+              "description.md",
+              "comments.md",
+              "comments-manifest.json",
+              "result.json",
+              "api-result.json",
+          }
+          for result in receipt["results"]:
+              if result["status"] == "FAILED":
+                  continue
+              video_id = result["video_id"]
+              pointer = json.loads(
+                  (
+                      durable
+                      / "memory"
+                      / "by-video-id"
+                      / f"{video_id}.json"
+                  ).read_text(encoding="utf-8")
+              )
+              snapshot = durable / pointer["snapshot_path"]
+              present = {path.name for path in snapshot.rglob("*") if path.is_file()}
+              assert not forbidden.intersection(present), present
+              overlay = volatile / pointer["api_overlay"]["path"]
+              assert (overlay / "overlay-metadata.json").is_file()
+              assert (snapshot / "transcript-manifest.json").is_file()
+              assert (snapshot / "reader-manifest.json").is_file()
+          print("STORAGE_BOUNDARY=PROVEN")
+          PY
+
+      - name: Publish durable transcript evidence
+        working-directory: ${{ runner.temp }}/durable
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "DURABLE_NO_CHANGES=TRUE"
+          else
+            git commit -m "Durable AITube batch ${{ steps.batch.outputs.batch_id }}"
+            git push origin HEAD:aitube-durable
+          fi
+
+      - name: Rewrite volatile API branch as one reachable commit
+        working-directory: ${{ runner.temp }}/volatile
+        run: |
+          set -euo pipefail
+          git add -A
+          tree="$(git write-tree)"
+          commit="$(
+            printf 'Rewrite volatile AITube API overlays for %s\n' \
+              '${{ steps.batch.outputs.batch_id }}' \
+              | git commit-tree "$tree"
+          )"
+          git push --force origin "$commit:refs/heads/aitube-volatile"
+          echo "VOLATILE_SINGLE_COMMIT=$commit"
 
       - name: Fail after publishing incomplete batch evidence
         if: steps.batch.outputs.batch_exit != '0'

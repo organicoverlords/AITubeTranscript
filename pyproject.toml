@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aitube-transcript"
-version = "0.4.0"
-description = "Private-first YouTube research with immutable snapshots, proof, retention records, and GPT memory."
+version = "0.5.0"
+description = "Private-first YouTube research with durable transcript evidence, volatile API overlays, proof, and GPT memory."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -47,6 +47,10 @@ aitube-batch = "aitubetranscript.batch:main"
 aitube-channel = "aitubetranscript.channel:main"
 aitube-memory-bank = "aitubetranscript.memory_bank:main"
 aitube-snapshot-store = "aitubetranscript.snapshot_store:main"
+aitube-split-store = "aitubetranscript.split_store:main"
+aitube-select-snapshot = "aitubetranscript.snapshot_selector:main"
+aitube-retention-maintenance = "aitubetranscript.retention_maintenance:main"
+aitube-legacy-split-migration = "aitubetranscript.legacy_split_migration:main"
 aitube-legacy-backfill = "aitubetranscript.legacy_backfill:main"
 aitube-request = "aitubetranscript.request:main"
 

@@ -1,0 +1,96 @@
+name: Private AITube volatile retention maintenance
+
+on:
+  workflow_call:
+    inputs:
+      tool_ref:
+        description: Immutable AITubeTranscript commit
+        required: true
+        type: string
+    outputs:
+      volatile_branch:
+        description: Rewritable YouTube API overlay branch
+        value: aitube-volatile
+
+permissions:
+  contents: write
+
+concurrency:
+  group: private-aitube-storage-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}/tool/src
+    steps:
+      - name: Require private caller and immutable tool revision
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+          TOOL_REF: ${{ inputs.tool_ref }}
+        run: |
+          set -euo pipefail
+          test "$REPOSITORY_PRIVATE" = "true" || {
+            echo "::error::Volatile retention maintenance must run privately."
+            exit 1
+          }
+          [[ "$TOOL_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::tool_ref must be a full 40-character commit SHA."
+            exit 1
+          }
+
+      - name: Check out pinned public tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: organicoverlords/AITubeTranscript
+          ref: ${{ inputs.tool_ref }}
+          path: tool
+          fetch-depth: 1
+
+      - id: prepare
+        name: Check out current volatile API tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/volatile"
+          cd "$RUNNER_TEMP/volatile"
+          git init -q
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch --depth=1 origin aitube-volatile; then
+            git checkout -q -B aitube-volatile FETCH_HEAD
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "VOLATILE_BRANCH_ABSENT=NO_ACTION"
+          fi
+
+      - name: Evaluate retention and purge expired overlays
+        if: steps.prepare.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          python3 -S -m aitubetranscript.retention_maintenance \
+            --volatile-root "$RUNNER_TEMP/volatile" \
+            --receipt "$RUNNER_TEMP/volatile/retention/last-maintenance.json" \
+            | tee "$RUNNER_TEMP/aitube-maintenance.txt"
+          grep -q '^VOLATILE_RETENTION_MAINTENANCE=PROVEN$' \
+            "$RUNNER_TEMP/aitube-maintenance.txt"
+
+      - name: Rewrite maintained volatile tree as one reachable commit
+        if: steps.prepare.outputs.exists == 'true'
+        working-directory: ${{ runner.temp }}/volatile
+        run: |
+          set -euo pipefail
+          git add -A
+          tree="$(git write-tree)"
+          commit="$(
+            printf 'Maintain volatile AITube API overlays\n' \
+              | git commit-tree "$tree"
+          )"
+          git push --force origin "$commit:refs/heads/aitube-volatile"
+          echo "VOLATILE_SINGLE_COMMIT=$commit"
