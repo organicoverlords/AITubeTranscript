@@ -8,9 +8,9 @@ on:
         required: true
         type: string
       tool_ref:
-        description: AITubeTranscript branch, tag, or commit
+        description: Immutable AITubeTranscript commit
         required: false
-        default: main
+        default: 36c2e71ba199208df1eed3fbd3aa62822376b3a4
         type: string
     outputs:
       batch_id:
@@ -61,6 +61,16 @@ jobs:
           set -euo pipefail
           test "$REPOSITORY_PRIVATE" = "true" || {
             echo "::error::AITubeTranscript refuses to run in a public repository."
+            exit 1
+          }
+
+      - name: Require immutable tool revision
+        env:
+          TOOL_REF: ${{ inputs.tool_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$TOOL_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::tool_ref must be a full 40-character commit SHA."
             exit 1
           }
 

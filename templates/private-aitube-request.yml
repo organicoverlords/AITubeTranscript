@@ -44,9 +44,9 @@ jobs:
 
   fetch:
     needs: request
-    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@main
+    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@36c2e71ba199208df1eed3fbd3aa62822376b3a4
     with:
       request_json: ${{ needs.request.outputs.request_json }}
-      tool_ref: main
+      tool_ref: 36c2e71ba199208df1eed3fbd3aa62822376b3a4
     secrets:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}

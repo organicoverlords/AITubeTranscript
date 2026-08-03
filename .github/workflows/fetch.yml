@@ -23,9 +23,9 @@ on:
         default: false
         type: boolean
       tool_ref:
-        description: AITubeTranscript commit used by the batch runtime
+        description: Immutable AITubeTranscript commit used by the batch runtime
         required: false
-        default: main
+        default: 36c2e71ba199208df1eed3fbd3aa62822376b3a4
         type: string
     secrets:
       YOUTUBE_API_KEY:
@@ -80,7 +80,7 @@ jobs:
 
   fetch:
     needs: prepare
-    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@main
+    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@36c2e71ba199208df1eed3fbd3aa62822376b3a4
     with:
       request_json: ${{ needs.prepare.outputs.request_json }}
       tool_ref: ${{ inputs.tool_ref }}
