@@ -33,6 +33,9 @@ def test_verified_legacy_monolithic_transcript_is_reconstructed(
     reader = json.loads(
         (source / "reader-manifest.json").read_text(encoding="utf-8")
     )
+    migrated_receipt = json.loads(
+        (source / "receipt.json").read_text(encoding="utf-8")
+    )
 
     assert manifest["coverage"]["status"] == "PROVEN"
     assert manifest["coverage"]["exactly_once"] is True
@@ -41,6 +44,7 @@ def test_verified_legacy_monolithic_transcript_is_reconstructed(
     assert manifest["legacy_reconstruction"]["refetched"] is False
     assert (source / "chunks" / "001.md").read_bytes() == transcript
     assert reader["transcript"]["chunks"] == ["chunks/001.md"]
+    assert migrated_receipt["transcript_coverage_status"] == "PROVEN"
 
 
 def test_legacy_monolithic_hash_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -58,9 +62,38 @@ def test_legacy_monolithic_hash_mismatch_is_rejected(tmp_path: Path) -> None:
         _ensure_legacy_transcript_manifest(source, receipt)
 
 
-def test_existing_manifest_is_not_rewritten(tmp_path: Path) -> None:
+def test_existing_proven_manifest_promotes_missing_receipt_coverage(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "videos" / "abcdefghijk" / "latest"
     source.mkdir(parents=True)
-    (source / "transcript-manifest.json").write_text("{}", encoding="utf-8")
+    (source / "transcript-manifest.json").write_text(
+        json.dumps({"coverage": {"status": "PROVEN"}}),
+        encoding="utf-8",
+    )
+    receipt = {
+        "video_id": "abcdefghijk",
+        "transcript_status": "PROVEN",
+        "segment_count": 1,
+    }
 
-    assert _ensure_legacy_transcript_manifest(source, {}) is False
+    assert _ensure_legacy_transcript_manifest(source, receipt) is False
+    migrated_receipt = json.loads(
+        (source / "receipt.json").read_text(encoding="utf-8")
+    )
+    assert migrated_receipt["transcript_coverage_status"] == "PROVEN"
+
+
+def test_existing_unproven_manifest_does_not_invent_coverage(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "videos" / "abcdefghijk" / "latest"
+    source.mkdir(parents=True)
+    (source / "transcript-manifest.json").write_text(
+        json.dumps({"coverage": {"status": "NOT_PROVEN"}}),
+        encoding="utf-8",
+    )
+    receipt: dict[str, object] = {}
+
+    assert _ensure_legacy_transcript_manifest(source, receipt) is False
+    assert not (source / "receipt.json").exists()
