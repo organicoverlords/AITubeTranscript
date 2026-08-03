@@ -115,3 +115,21 @@ videos/<VIDEO_ID>/latest/
 ```
 
 New integrations should prefer pointer files because they distinguish freshness from evidence quality.
+
+## Legacy backfill
+
+Private repositories installed before snapshot storage may run the manual repair workflow once. It uses:
+
+```text
+python3 -S -m aitubetranscript.legacy_backfill --vault <AITUBE_RESULTS_CHECKOUT>
+```
+
+The migration:
+
+- converts the currently materialized legacy video, channel, and batch `latest/` bundles into immutable snapshots;
+- marks inferred request parameters with `legacy_inferred = true`;
+- creates best/latest pointers and retention records;
+- rebuilds and promotes compact memory entries;
+- skips already migrated bundles, so repeated repair runs are safe.
+
+This migration does not claim to recover richer variants that survive only in old Git commits. Recovering those requires a separate history-recovery pass.

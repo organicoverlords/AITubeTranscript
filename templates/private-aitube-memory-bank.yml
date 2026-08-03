@@ -1,4 +1,4 @@
-name: Private AITube memory repair
+name: Private AITube memory repair and legacy backfill
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       tool_ref:
         description: Pinned AITubeTranscript commit to use for repair
         required: false
-        default: 36c2e71ba199208df1eed3fbd3aa62822376b3a4
+        default: d82369acb738a344dea7ada9bc743982442743f0
         type: string
 
 permissions:
@@ -19,7 +19,7 @@ concurrency:
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Require private repository and immutable tool revision
         env:
@@ -50,30 +50,13 @@ jobs:
           path: vault
           fetch-depth: 1
 
-      - name: Rebuild memory, preferred pointers, and retention manifest
+      - name: Backfill legacy bundles and rebuild memory
         env:
           PYTHONPATH: ${{ github.workspace }}/tool/src
         run: |
           set -euo pipefail
-          python3 -S -m aitubetranscript.memory_bank \
-            --vault "$GITHUB_WORKSPACE/vault" \
-            --rebuild-all
-          python3 -S - <<'PY'
-          from pathlib import Path
-
-          from aitubetranscript.memory_preference import promote_preferred_video_entries
-          from aitubetranscript.snapshot_store import rebuild_retention_manifest
-
-          vault = Path("vault").resolve()
-          video_ids = [
-              path.parent.parent.name
-              for path in (vault / "videos").glob("*/pointers/best.json")
-          ]
-          promote_preferred_video_entries(vault, video_ids)
-          rebuild_retention_manifest(vault)
-          print(f"PREFERRED_VIDEO_COUNT={len(video_ids)}")
-          print("MEMORY_REPAIR=PROVEN")
-          PY
+          python3 -S -m aitubetranscript.legacy_backfill \
+            --vault "$GITHUB_WORKSPACE/vault"
 
       - name: Commit repaired private memory bank
         working-directory: vault
@@ -81,6 +64,6 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add memory videos retention
-          git commit -m "Repair private AITube memory bank" || exit 0
+          git add memory retention videos channels batches
+          git commit -m "Backfill and repair private AITube memory bank" || exit 0
           git push origin HEAD:aitube-results

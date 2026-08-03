@@ -71,7 +71,7 @@ Commit them to `main`.
 
 The request workflow is the normal production path. It must call the reusable batch workflow at the exact pinned AITubeTranscript commit supplied by the current template. Do not replace a full commit SHA with `main`.
 
-The memory workflow is **manual repair-only**. Normal fetches already publish immutable snapshots, latest and best pointers, memory indexes, and retention records in one atomic transaction.
+The memory workflow is **manual repair and legacy-backfill only**. Normal fetches already publish immutable snapshots, latest and best pointers, memory indexes, and retention records in one atomic transaction.
 
 ## 5. Create the request branch
 
@@ -155,11 +155,13 @@ For each new request:
 
 Request examples are in [`BATCH_USAGE.md`](BATCH_USAGE.md). GPT rules are in [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md).
 
-## Manual memory repair
+## Manual repair and legacy backfill
 
-Run **Private AITube memory repair** manually only when indexes or pointers need rebuilding. It shares the same result-branch concurrency lock as normal publishing.
+Run **Private AITube memory repair and legacy backfill** once after upgrading an older latest-only deployment. It converts the currently materialized legacy video, channel, and batch bundles into immutable snapshots, then rebuilds memory, preferred pointers, and retention records.
 
-Do not configure it as an automatic `workflow_run` task.
+The operation is idempotent: later runs skip already migrated bundles. After the one-time migration, run it only when indexes or pointers need repair. It shares the same result-branch concurrency lock as normal publishing.
+
+Do not configure it as an automatic `workflow_run` task. The migration does not recover richer variants that survive only in old Git history.
 
 ## API retention
 
