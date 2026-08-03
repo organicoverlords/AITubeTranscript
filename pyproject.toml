@@ -47,6 +47,7 @@ aitube-batch = "aitubetranscript.batch:main"
 aitube-channel = "aitubetranscript.channel:main"
 aitube-memory-bank = "aitubetranscript.memory_bank:main"
 aitube-snapshot-store = "aitubetranscript.snapshot_store:main"
+aitube-legacy-backfill = "aitubetranscript.legacy_backfill:main"
 aitube-request = "aitubetranscript.request:main"
 
 [project.urls]
