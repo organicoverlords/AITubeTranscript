@@ -1,0 +1,150 @@
+name: Private AITube legacy split migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: private-aitube-storage-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: ${{ github.workspace }}/tool/src
+    steps:
+      - name: Require private repository
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$REPOSITORY_PRIVATE" = "true" || {
+            echo "::error::Legacy split migration must run in a private repository."
+            exit 1
+          }
+
+      - name: Check out pinned migration code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: organicoverlords/AITubeTranscript
+          ref: beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
+          path: tool
+          fetch-depth: 1
+
+      - name: Check out currently materialized legacy results
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: aitube-results
+          path: legacy
+          fetch-depth: 1
+
+      - name: Prepare durable transcript branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/durable"
+          cd "$RUNNER_TEMP/durable"
+          git init -q
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch --depth=1 origin aitube-durable; then
+            git checkout -q -B aitube-durable FETCH_HEAD
+          else
+            git checkout -q --orphan aitube-durable
+            printf '# Durable private AITube transcript evidence\n' > README.md
+          fi
+
+      - name: Prepare rewritable volatile API branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/volatile"
+          cd "$RUNNER_TEMP/volatile"
+          git init -q
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git fetch --depth=1 origin aitube-volatile; then
+            git checkout -q -B aitube-volatile FETCH_HEAD
+          else
+            git checkout -q --orphan aitube-volatile
+            printf '# Volatile private AITube API overlays\n' > README.md
+          fi
+
+      - name: Split currently materialized legacy bundles
+        run: |
+          set -euo pipefail
+          python3 -S -m aitubetranscript.legacy_split_migration \
+            --legacy-root "$GITHUB_WORKSPACE/legacy" \
+            --durable-root "$RUNNER_TEMP/durable" \
+            --volatile-root "$RUNNER_TEMP/volatile" \
+            | tee "$RUNNER_TEMP/aitube-legacy-split.txt"
+          grep -q '^LEGACY_SPLIT_MIGRATION=PROVEN$' \
+            "$RUNNER_TEMP/aitube-legacy-split.txt"
+
+      - name: Verify migrated storage boundary
+        run: |
+          set -euo pipefail
+          python3 -S - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          durable = Path(os.environ["RUNNER_TEMP"], "durable")
+          volatile = Path(os.environ["RUNNER_TEMP"], "volatile")
+          forbidden = {
+              "description.md",
+              "comments.md",
+              "comments-manifest.json",
+              "result.json",
+              "api-result.json",
+          }
+          video_pointers = sorted(
+              (durable / "memory" / "by-video-id").glob("*.json")
+          )
+          for pointer_path in video_pointers:
+              pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+              snapshot = durable / pointer["snapshot_path"]
+              names = {path.name for path in snapshot.rglob("*") if path.is_file()}
+              assert not forbidden.intersection(names), names
+              assert (snapshot / "transcript-manifest.json").is_file()
+              assert (snapshot / "reader-manifest.json").is_file()
+              overlay = volatile / pointer["api_overlay"]["path"]
+              assert (overlay / "overlay-metadata.json").is_file()
+          print(f"MIGRATED_VIDEO_POINTERS={len(video_pointers)}")
+          print("MIGRATION_STORAGE_BOUNDARY=PROVEN")
+          PY
+
+      - name: Publish migrated durable evidence
+        working-directory: ${{ runner.temp }}/durable
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "DURABLE_MIGRATION_NO_CHANGES=TRUE"
+          else
+            git commit -m "Migrate legacy AITube transcript evidence"
+            git push origin HEAD:aitube-durable
+          fi
+
+      - name: Rewrite migrated volatile API tree
+        working-directory: ${{ runner.temp }}/volatile
+        run: |
+          set -euo pipefail
+          git add -A
+          tree="$(git write-tree)"
+          commit="$(
+            printf 'Migrate legacy AITube API overlays\n' \
+              | git commit-tree "$tree"
+          )"
+          git push --force origin "$commit:refs/heads/aitube-volatile"
+          echo "VOLATILE_SINGLE_COMMIT=$commit"

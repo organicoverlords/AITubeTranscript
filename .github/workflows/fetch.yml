@@ -23,13 +23,13 @@ on:
         default: false
         type: boolean
       tool_ref:
-        description: Immutable AITubeTranscript commit used by the batch runtime
+        description: Immutable AITubeTranscript split-storage release
         required: false
-        default: 36c2e71ba199208df1eed3fbd3aa62822376b3a4
+        default: beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
         type: string
     secrets:
       YOUTUBE_API_KEY:
-        description: YouTube Data API key for descriptions and comments
+        description: YouTube Data API key for volatile descriptions and comments
         required: true
 
 permissions:
@@ -80,7 +80,7 @@ jobs:
 
   fetch:
     needs: prepare
-    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@36c2e71ba199208df1eed3fbd3aa62822376b3a4
+    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
     with:
       request_json: ${{ needs.prepare.outputs.request_json }}
       tool_ref: ${{ inputs.tool_ref }}
