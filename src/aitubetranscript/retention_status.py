@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections import Counter
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from typing import Any
 
