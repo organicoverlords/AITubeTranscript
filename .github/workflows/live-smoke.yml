@@ -45,7 +45,7 @@ jobs:
           artifact_action = "actions/" + "upload-artifact"
           old_live_step = "Fetch acceptance " + "video"
           fetch_command = "aitube-" + "transcript"
-          release_sha = "beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f"
+          release_sha = "959f097eabc884032caa1272f3cbd83b2ee0cf5f"
 
           assert "CALLER_REPOSITORY_PRIVATE" in action
           assert "refuses to run in a public repository" in action

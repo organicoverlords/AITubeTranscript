@@ -25,7 +25,7 @@ on:
       tool_ref:
         description: Immutable AITubeTranscript split-storage release
         required: false
-        default: beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
+        default: 959f097eabc884032caa1272f3cbd83b2ee0cf5f
         type: string
     secrets:
       YOUTUBE_API_KEY:
@@ -80,7 +80,7 @@ jobs:
 
   fetch:
     needs: prepare
-    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
+    uses: organicoverlords/AITubeTranscript/.github/workflows/batch-fetch.yml@959f097eabc884032caa1272f3cbd83b2ee0cf5f
     with:
       request_json: ${{ needs.prepare.outputs.request_json }}
       tool_ref: ${{ inputs.tool_ref }}
