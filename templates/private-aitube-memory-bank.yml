@@ -6,7 +6,7 @@ on:
       tool_ref:
         description: Pinned AITubeTranscript commit to use for repair
         required: false
-        default: main
+        default: 36c2e71ba199208df1eed3fbd3aa62822376b3a4
         type: string
 
 permissions:
@@ -21,12 +21,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Require private repository
+      - name: Require private repository and immutable tool revision
         env:
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+          TOOL_REF: ${{ inputs.tool_ref }}
         run: |
           test "$REPOSITORY_PRIVATE" = "true" || {
             echo "::error::The AITube memory repair must run in a private repository."
+            exit 1
+          }
+          [[ "$TOOL_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::tool_ref must be a full 40-character commit SHA."
             exit 1
           }
 
