@@ -37,7 +37,7 @@ The installed system must support:
 - separate latest and best pointers;
 - permanent private memory indexes;
 - API retention records;
-- manual memory repair.
+- manual memory repair and idempotent legacy backfill.
 
 ## First MagicMusic payload
 
@@ -57,7 +57,7 @@ Use one self-contained PowerShell payload to:
    - `aitube-requests/current.json`
 7. verify all third-party Actions and reusable workflows use full immutable commit SHAs;
 8. verify the request workflow calls the current snapshot-capable `batch-fetch.yml` and passes its exact pinned tool commit;
-9. verify the memory workflow is `workflow_dispatch` only and cannot run automatically through `workflow_run`;
+9. verify the memory workflow is `workflow_dispatch` only, invokes the pinned legacy-backfill command, and cannot run automatically through `workflow_run`;
 10. commit and push the files to `main`;
 11. create and push `request/aitube-live` from that exact commit;
 12. enable repository-content writes for Actions;
@@ -115,9 +115,11 @@ retention/manifest.json
 
 8. confirm the memory pointer includes `preferred_result_path`, the selected request profile requests 100 comments, and the retention object includes refresh and delete-or-refresh deadlines;
 9. confirm retrieved content is marked `EXTERNAL_UNTRUSTED_CONTENT`;
-10. confirm the separate memory workflow is manual repair-only;
+10. confirm the separate memory workflow is manual repair and legacy-backfill only;
 11. verify every required reader file is privately accessible;
 12. report only evidence-backed `PROVEN`, `REJECTED`, `NOT_PROVEN`, or `BLOCKED` claims.
+
+For an upgraded repository that already contains latest-only results, dispatch the manual repair workflow once. Verify it creates snapshots and pointers for the currently materialized legacy bundles, marks inferred profiles with `legacy_inferred=true`, and remains idempotent when run again. Do not claim it recovered variants that exist only in old Git history.
 
 Do not publish generated research or logs to the public repository.
 
