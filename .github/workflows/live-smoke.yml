@@ -73,15 +73,23 @@ jobs:
           assert "git commit-tree" in maintenance
           assert "git push --force" in maintenance
 
-          for template in (request_template, retention_template, migration_template):
-              assert release_sha in template
-              mutable_refs = re.findall(
+          for template in (request_template, retention_template):
+              refs = re.findall(
                   r"organicoverlords/AITubeTranscript/[^\s@]+@([^\s]+)",
                   template,
               )
-              assert mutable_refs
-              assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in mutable_refs)
+              assert refs
+              assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs)
+              assert refs == [release_sha]
               assert artifact_action not in template
+
+          assert release_sha in migration_template
+          assert (
+              "repository: organicoverlords/AITubeTranscript"
+              in migration_template
+          )
+          assert f"ref: {release_sha}" in migration_template
+          assert artifact_action not in migration_template
 
           assert "schedule:" in retention_template
           assert "workflow_dispatch:" in retention_template
