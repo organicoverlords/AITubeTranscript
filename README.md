@@ -14,6 +14,7 @@ The source code is public. Official workflows reject public callers so requests,
 - **Immutable snapshots and best pointers:** [`SNAPSHOT_STORAGE.md`](SNAPSHOT_STORAGE.md)
 - **YouTube API retention:** [`YOUTUBE_DATA_RETENTION.md`](YOUTUBE_DATA_RETENTION.md)
 - **Videos, playlists, and channel requests:** [`BATCH_USAGE.md`](BATCH_USAGE.md)
+- **Proven reading of large transcript batches:** [`READING_WORKFLOW.md`](READING_WORKFLOW.md)
 - **Canonical GPT operating contract:** [`GPT_FAST_PATH.md`](GPT_FAST_PATH.md)
 - **Copy-paste ChatGPT memory block:** [`GPT_MEMORY.md`](GPT_MEMORY.md)
 
@@ -124,6 +125,25 @@ Coverage manifests must prove exactly-once ordered representation with no missin
 GPT may claim **“I read every word”** only after opening every file listed by the selected snapshot's `reader-manifest.json`.
 
 Retrieval proof is separate from transcript textual accuracy. Automatic captions and third-party transcripts may contain repeated words, punctuation defects, and incorrect names. Verify important quotations against the original video.
+
+## Reading large batches
+
+Fetching, scanning, reading, and synthesizing are separate operations.
+
+Use these explicit modes:
+
+```text
+CATALOG_SCAN
+TRANSCRIPT_COMPLETE
+FULL_RESEARCH_COMPLETE
+DEEP_SYNTHESIS
+```
+
+A fast batch fetch does not prove that any transcript was read. For multi-video work, open every selected reader manifest, maintain a per-video reading ledger, process bounded groups, and reconcile all expected files before claiming completion.
+
+Report fetch, manifest-selection, reading, synthesis, and total time separately. Use measured values where available and label estimates as estimates. Never promise a universal reading speed.
+
+See [`READING_WORKFLOW.md`](READING_WORKFLOW.md) for the complete claim vocabulary, ledger, timing model, and failure rules.
 
 ## API freshness and retention
 
