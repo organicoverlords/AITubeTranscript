@@ -1,0 +1,15 @@
+name: Private AITube retention
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  maintain:
+    uses: organicoverlords/AITubeTranscript/.github/workflows/volatile-maintenance.yml@beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
+    with:
+      tool_ref: beb6b8773d4d2c721e4f4d239f3d194b1b4d9b6f
