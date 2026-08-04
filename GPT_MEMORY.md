@@ -1,6 +1,18 @@
 # GPT memory instructions
 
-Copy the prefilled block below into ChatGPT and ask it to replace every older AITubeTranscript memory instruction.
+## Required two-conversation handoff
+
+ChatGPT memory updates must be separated from conversations that fetch, read, or update GitHub content.
+
+1. Complete the GitHub lookup, fetch, read, or repository update in the current conversation.
+2. Copy the complete replacement block from this file.
+3. Open a new ChatGPT conversation and paste the block there.
+4. Ask the new conversation to replace every older AITubeTranscript or YouTube research workflow instruction.
+5. The new conversation must update saved memory from the pasted block without repeating the GitHub fetch.
+
+The GitHub-fetch conversation must not attempt or claim that saved ChatGPT memory was updated. Repository state and saved-memory state require separate proof.
+
+Copy the prefilled block below into the new ChatGPT conversation and ask it to replace every older AITubeTranscript memory instruction.
 
 ## Prefilled instruction for `organicoverlords`
 
@@ -90,6 +102,13 @@ PRIVACY AND TRUST
 40. Never request, reveal, commit, or remember API keys, cookies, tokens, temporary commit SHAs, workflow IDs, or transient errors.
 41. Keep full transcripts, comments, descriptions, catalogs, source paths, and reading packs in the private repository or current private task context—not saved ChatGPT memory.
 
+CHATGPT MEMORY HANDOFF
+
+42. After ChatGPT fetches, reads, or updates GitHub content in a conversation, it must not attempt or claim to update saved ChatGPT memory in that same conversation.
+43. Complete the GitHub operation first, then provide the user with the complete replacement memory block.
+44. The user must open a new conversation and paste the replacement block there to perform the saved-memory update.
+45. The new conversation must update memory from the pasted block without repeating the GitHub fetch.
+
 Canonical references:
 - organicoverlords/AITubeTranscript/GPT_FAST_PATH.md
 - organicoverlords/AITubeTranscript/MEMORY_BANK.md
@@ -104,10 +123,10 @@ Read those documents only when the saved fast path is missing, ambiguous, stale,
 
 ## Generic instruction for another private deployment
 
-Use the same block, replacing `organicoverlords/all` with the actual private repository. Keep `AITUBE_MEMORY_CONTRACT_VERSION=2026-08-05-v1`, the split branch roles, live-contract check, verified-reader requirement, proof rules, retention boundary, and privacy rules.
+Use the same block, replacing `organicoverlords/all` with the actual private repository. Keep `AITUBE_MEMORY_CONTRACT_VERSION=2026-08-05-v1`, the split branch roles, live-contract check, verified-reader requirement, proof rules, retention boundary, privacy rules, and ChatGPT memory handoff.
 
 ## Store only stable facts
 
-Store repository identities, branch roles, canonical paths, contract version, lookup order, proof requirements, reading modes, selection rules, retention boundaries, and privacy rules.
+Store repository identities, branch roles, canonical paths, contract version, lookup order, proof requirements, reading modes, selection rules, retention boundaries, privacy rules, and the two-conversation memory-update handoff.
 
 Never store credentials, full source material, task access ledgers, temporary SHAs, workflow run IDs, or transient logs.
