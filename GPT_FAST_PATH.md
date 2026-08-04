@@ -27,6 +27,18 @@ aitube-check-memory-contract \
 
 If the saved contract is stale but the live split layout is valid, use the live split layout and update saved memory. Never route normal work to `aitube-results` because an old prompt named it.
 
+## ChatGPT memory-update handoff
+
+When a task requires both GitHub access and a saved ChatGPT memory update, treat them as a two-conversation handoff:
+
+1. Complete the GitHub lookup, fetch, read, or repository update in the current conversation.
+2. Do not attempt or claim to update saved ChatGPT memory after GitHub content has been fetched in that conversation.
+3. Return the complete replacement memory block from `GPT_MEMORY.md` to the user.
+4. The user opens a new conversation and pastes that block there.
+5. The new conversation updates saved memory from the pasted block without repeating the GitHub fetch.
+
+Never report the memory update as completed in the GitHub-fetch conversation. Repository state and saved ChatGPT memory are separate proof domains.
+
 ## Step 0: resolve the evidence requirement
 
 Choose:
